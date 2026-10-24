@@ -221,6 +221,42 @@ async fn happy_path_normalizes_events_and_tags_subagents() {
     );
 }
 
+/// A run whose Zeron server is side-chats-only launches the CLI without its
+/// subagent tools (`Agent`, which the init frame lists as `Task`, and
+/// `Workflow`); any other run keeps them.
+#[tokio::test]
+async fn a_side_chats_only_run_launches_without_subagent_tools() {
+    let mut server = zeron_proto::McpServer {
+        name: "zeron".into(),
+        command: "zeron".into(),
+        args: vec!["mcp".into()],
+        env: Default::default(),
+    };
+    let mut tools = Vec::new();
+    for side_chats_only in [false, true] {
+        if side_chats_only {
+            server.env.insert(
+                zeron_proto::McpServer::SIDE_CHATS_ONLY_ENV.into(),
+                "1".into(),
+            );
+        }
+        let mut req = request("scenario:native-subagents");
+        req.mcp = Some(server.clone());
+        let (controls, _steer, _token) = controls("A");
+        let events = run_to_end(&harness(), req, controls).await;
+        tools.push(
+            events
+                .iter()
+                .find_map(|e| match e {
+                    AgentEvent::SessionStarted { tools, .. } => Some(tools.clone()),
+                    _ => None,
+                })
+                .expect("the session starts"),
+        );
+    }
+    assert_eq!(tools, [vec!["Bash", "Task", "Workflow"], vec!["Bash"]]);
+}
+
 #[tokio::test]
 async fn eager_done_forwards_wake_turn_as_second_done() {
     // The background-subagent shape (live-verified 2.1.228): result #1 is

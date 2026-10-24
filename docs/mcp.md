@@ -16,12 +16,18 @@ the stdio tool-server subset is tiny, so no SDK dependency was taken.
 The engine can inject this server into a harness's MCP config with the
 originating chat in the environment:
 
-| Variable               | Meaning                                                  |
-| ---------------------- | -------------------------------------------------------- |
-| `ZERON_IPC_PORT`       | Engine to proxy (default 27654).                         |
-| `ZERON_IPC_TOKEN_FILE` | The engine's IPC bearer file (see below).                |
-| `ZERON_CHAT_ID`        | The chat whose agent spawned this server.                |
-| `ZERON_DEVICE_ID`      | That chat's host device.                                 |
+| Variable                | Meaning                                                  |
+| ----------------------- | -------------------------------------------------------- |
+| `ZERON_IPC_PORT`        | Engine to proxy (default 27654).                         |
+| `ZERON_IPC_TOKEN_FILE`  | The engine's IPC bearer file (see below).                |
+| `ZERON_CHAT_ID`         | The chat whose agent spawned this server.                |
+| `ZERON_DEVICE_ID`       | That chat's host device.                                 |
+| `ZERON_SIDE_CHATS_ONLY` | `1`: the agent has no subagent tools of its own (below). |
+
+`ZERON_SIDE_CHATS_ONLY=1`: the host device turned the provider's native
+subagents off (Settings → Providers), so `initialize` tells the agent to
+delegate with `create_chats`. Never set for a chat that has a parent, nor
+for one whose host doesn't know its parent yet.
 
 ### IPC authentication
 

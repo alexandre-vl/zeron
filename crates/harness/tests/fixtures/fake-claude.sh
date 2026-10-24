@@ -55,6 +55,21 @@ case "$first" in
   emit '{"type":"result","subtype":"success","result":"Fix Login Flow","usage":{"input_tokens":1,"output_tokens":1},"session_id":"sess-title"}'
   ;;
 
+*scenario:native-subagents*)
+  # A bare `--disallowedTools` rule takes the tools out of the init frame's
+  # list, as 2.1.310 does (it lists the `Agent` tool as `Task`). The reply
+  # says whether the inline Zeron server is side-chats-only.
+  tools='"Bash","Task","Workflow"'
+  server='native subagents'
+  for arg in "$@"; do
+    [ "$arg" = "--disallowedTools=Agent,Task,Workflow" ] && tools='"Bash"'
+    case "$arg" in *'"ZERON_SIDE_CHATS_ONLY":"1"'*) server='side chats only' ;; esac
+  done
+  emit "{\"type\":\"system\",\"subtype\":\"init\",\"model\":\"claude-fable-5\",\"tools\":[$tools],\"cwd\":\"/tmp\",\"session_id\":\"sess-native\"}"
+  emit "{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"$server\"}}}"
+  emit '{"type":"result","subtype":"success","result":"ok","usage":{"input_tokens":1,"output_tokens":1},"session_id":"sess-native"}'
+  ;;
+
 
 *scenario:happy*)
   emit '{"type":"system","subtype":"init","model":"claude-fable-5","tools":["Bash","Read"],"cwd":"/tmp","session_id":"sess-1"}'

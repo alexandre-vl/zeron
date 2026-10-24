@@ -374,6 +374,17 @@ impl ClaudeHarness {
             // (no `--strict-mcp-config`): the CLI merges an inline JSON
             // config with settings-sourced ones.
             cmd.args(["--mcp-config", &mcp_config_arg(mcp)]);
+            // Delegation goes through that server's side chats only. A bare
+            // tool name "removes the matching tools from Claude's context"
+            // (https://code.claude.com/docs/en/cli-reference), so the model
+            // never calls them: a call refused at run time would stay
+            // running (#893). The model calls the spawn tool `Agent`, the
+            // init frame lists it as `Task`, and `Workflow` runs agents of
+            // its own; with the rule, the init frame lists neither `Task`
+            // nor `Workflow` (live-verified 2.1.310).
+            if mcp.side_chats_only() {
+                cmd.arg("--disallowedTools=Agent,Task,Workflow");
+            }
         }
         if !request.cwd.is_empty() {
             cmd.current_dir(&request.cwd);

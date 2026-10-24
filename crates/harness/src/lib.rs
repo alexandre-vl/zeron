@@ -709,6 +709,17 @@ pub fn supports_titles(id: HarnessId) -> bool {
     )
 }
 
+/// Drivers that launch without the provider's own subagent tools when the
+/// run's Zeron server is side-chats-only ([`zeron_proto::McpServer::side_chats_only`]),
+/// and get them back on the next launch without it. Not Codex: its driver
+/// starts such a thread, but a thread keeps the multi-agent mode it last ran
+/// with (openai/codex rust-v0.153.4, codex-rs/core/src/session/mod.rs
+/// `resolve_multi_agent_version`), so turning them back on would not reach
+/// a chat that ran while they were off.
+pub fn switches_native_subagents(id: HarnessId) -> bool {
+    matches!(id, HarnessId::ClaudeCode)
+}
+
 #[cfg(test)]
 mod path_tests {
     use super::child_path_entries;

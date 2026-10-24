@@ -55,6 +55,10 @@ pub mod methods {
     /// (`{enabled, cloud}`; set with `{enabled}`).
     pub const GET_COMMIT_CREDIT: &str = "GetCommitCredit";
     pub const SET_COMMIT_CREDIT: &str = "SetCommitCredit";
+    /// Which providers on this device run without their own subagents
+    /// (`{switchable, off}`; set with `{harness, enabled}`).
+    pub const GET_NATIVE_SUBAGENTS: &str = "GetNativeSubagents";
+    pub const SET_NATIVE_SUBAGENTS: &str = "SetNativeSubagents";
     pub const SET_HARNESS_ENABLED: &str = "SetHarnessEnabled";
     pub const LIST_MODELS: &str = "ListModels";
     pub const LIST_SKILLS: &str = "ListSkills";

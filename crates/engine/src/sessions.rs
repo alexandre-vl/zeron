@@ -196,6 +196,12 @@ struct RunHandle {
     /// parked session whose CLI was since updated in place (by its own
     /// auto-updater or by hand) is replaced before its next turn.
     binary: Option<String>,
+    /// Launched without the provider's own subagents (Settings → Providers):
+    /// a parked session whose setting has since flipped is replaced before
+    /// its next turn. The run's intent: the restriction rides Zeron's MCP
+    /// server, so with no IPC port served ([`Inner::zeron_mcp`] returns
+    /// `None`) the provider keeps its subagents.
+    side_chats_only: bool,
 }
 
 /// Which CLI binary a run of `harness` launches now: its real path, size and
@@ -749,6 +755,7 @@ impl SessionsEngine {
                 h.credential.clone(),
                 h.binary.clone(),
                 h.runtime_config.harness.clone(),
+                h.side_chats_only,
             )
         });
         if let Some((
@@ -762,6 +769,7 @@ impl SessionsEngine {
             credential,
             binary,
             live_harness,
+            side_chats_only,
         )) = routed
         {
             if idle {
@@ -773,14 +781,16 @@ impl SessionsEngine {
                     Err(EngineError::Other("incompatible live runtime".into()))
                 };
             }
-            // A parked session started with another account (Cloud), or from
-            // a CLI binary since updated: replace it.
+            // A parked session started with another account (Cloud), from a
+            // CLI binary since updated, or with native subagents since
+            // switched: replace it.
             let route = if self
                 .credential_changed(chat_id, harness_id, credential.as_deref())
                 .await
                 || self
                     .binary_changed(chat_id, harness_id, live_harness, binary.as_deref())
                     .await
+                || self.native_subagents_changed(chat_id, harness_id, side_chats_only)
             {
                 None
             } else {
@@ -936,6 +946,7 @@ impl SessionsEngine {
                 .ok()
                 .flatten()
         };
+        let side_chats_only = self.inner.side_chats_only(chat_id, harness_id);
 
         // Engine-owned resume (zeron sessions.ts:736 — every dispatch read the
         // chat's stored harness session): callers always send `resume: None`;
@@ -1077,6 +1088,7 @@ impl SessionsEngine {
                 shutdown_cut: std::sync::atomic::AtomicBool::new(false),
                 credential,
                 binary,
+                side_chats_only,
             },
         );
         drop(runs);
@@ -1127,6 +1139,7 @@ impl SessionsEngine {
                 started,
             },
             turn,
+            side_chats_only,
         ));
         Ok(run_id)
     }
@@ -1187,6 +1200,27 @@ impl SessionsEngine {
             }
             _ => false,
         }
+    }
+
+    /// Whether a session parked between turns launched with native subagents
+    /// otherwise than a run would launch now (Settings → Providers). Same
+    /// guards as [`Self::credential_changed`].
+    fn native_subagents_changed(
+        &self,
+        chat_id: &str,
+        harness_id: HarnessId,
+        started_side_chats_only: bool,
+    ) -> bool {
+        let side_chats_only = self.inner.side_chats_only(chat_id, harness_id);
+        if started_side_chats_only == side_chats_only
+            || self.turn_in_flight(chat_id)
+            || self.holds_background_work(chat_id)
+        {
+            return false;
+        }
+        tracing::info!(chat = %chat_id, harness = ?harness_id,
+            "native subagents switched; replacing the parked session");
+        true
     }
 
     /// A warm send's prompt with the fork's copied history in front, when the
@@ -2117,6 +2151,23 @@ impl Inner {
             .is_some_and(|handle| handle.continues_with_sent_message())
     }
 
+    /// Whether a run of `chat_id` launches without its provider's own
+    /// subagents (Settings → Providers), delegating through side chats
+    /// instead. Never for a chat that has a parent: delegation is one level
+    /// deep, so a side chat can't create chats and keeps its provider's own.
+    /// Nor while its parent is unknown here (its run outran its row).
+    fn side_chats_only(&self, chat_id: &str, harness_id: HarnessId) -> bool {
+        !self.registry.native_subagents(harness_id)
+            && self.workspace().is_none_or(|ws| {
+                !ws.parent_unknown(chat_id)
+                    && !ws
+                        .chat(chat_id)
+                        .ok()
+                        .flatten()
+                        .is_some_and(|chat| chat.parent_chat_id.is_some())
+            })
+    }
+
     /// Zeron's own MCP server for a run of `chat_id`: this binary's `zeron
     /// mcp` subcommand, dialing the engine's IPC port and stamped with the
     /// originating chat + device so the agent's side chats link back here.
@@ -2126,7 +2177,10 @@ impl Inner {
     /// `ZERON_IPC_TOKEN`: some harnesses hand this env to their CLI on the
     /// command line (Claude's inline `--mcp-config`), where any local user can
     /// read it with `ps`. The file is owner-only and always current.
-    fn zeron_mcp(&self, chat_id: &str) -> Option<zeron_proto::McpServer> {
+    ///
+    /// `side_chats_only`: the run's provider launches without its own
+    /// subagents, so all delegation goes through this server.
+    fn zeron_mcp(&self, chat_id: &str, side_chats_only: bool) -> Option<zeron_proto::McpServer> {
         let port = self.ipc_port.load(std::sync::atomic::Ordering::Relaxed);
         if port == 0 {
             return None;
@@ -2139,6 +2193,12 @@ impl Inner {
         ]
         .into_iter()
         .collect();
+        if side_chats_only {
+            env.insert(
+                zeron_proto::McpServer::SIDE_CHATS_ONLY_ENV.to_owned(),
+                "1".to_owned(),
+            );
+        }
         if let Some(path) = lock(&self.ipc_token_file)
             .as_ref()
             .and_then(|path| path.to_str())
@@ -3379,6 +3439,7 @@ async fn drive_run(
     mut cancel_rx: watch::Receiver<bool>,
     resume_state: RunResumeState,
     turn: TurnControl,
+    side_chats_only: bool,
 ) {
     let device_id = inner.device_id.clone();
     // Captured for post-run auto-titling (the request moves into the harness).
@@ -3389,18 +3450,19 @@ async fn drive_run(
     if request.resume.is_none() {
         let _ = doc.clear_context_usage();
     }
-    // The host stamps its own MCP server onto every run it drives, so the
-    // agent can spawn and talk to side chats through the engine it runs in.
-    if request.mcp.is_none() {
-        request.mcp = inner.zeron_mcp(&chat_id);
-    }
     // Kept whole for the startup-crash retry (same user entry; dispatch
     // re-injects the stored resume id). Option so the retry branch (inside
-    // the event loop) can take ownership.
+    // the event loop) can take ownership. Taken before the MCP stamp, which
+    // the retry's own dispatch redoes with the settings of its time.
     let mut retry_request = Some(RunRequest {
         resume: None,
         ..request.clone()
     });
+    // The host stamps its own MCP server onto every run it drives, so the
+    // agent can spawn and talk to side chats through the engine it runs in.
+    if request.mcp.is_none() {
+        request.mcp = inner.zeron_mcp(&chat_id, side_chats_only);
+    }
     // A revived turn the resumed session already holds: the provider gets
     // the continuation, while the transcript, preview and title keep the
     // user's own message (and the retries carry the revival on).

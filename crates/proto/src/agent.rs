@@ -404,6 +404,20 @@ pub struct McpServer {
     pub env: std::collections::BTreeMap<String, String>,
 }
 
+impl McpServer {
+    /// Set to `1` on Zeron's own server when its host turned the provider's
+    /// native subagents off (Settings → Providers) and the chat has no
+    /// parent: the agent delegates through this server's side chats instead,
+    /// and the driver launches it without its subagent tools.
+    pub const SIDE_CHATS_ONLY_ENV: &'static str = "ZERON_SIDE_CHATS_ONLY";
+
+    pub fn side_chats_only(&self) -> bool {
+        self.env
+            .get(Self::SIDE_CHATS_ONLY_ENV)
+            .is_some_and(|value| value == "1")
+    }
+}
+
 /// Isolated-worktree directive riding [`RunRequest`]. The worktree is created
 /// by the HOST while draining the queued Run — not by the sender over a
 /// blocking CreateWorktree RPC — so the send path stays durable: a lost relay
