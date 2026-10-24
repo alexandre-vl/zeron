@@ -674,6 +674,17 @@ async fn captured_live_background_subagent_frames_replay_correctly() {
         )),
         "subagent Bash call arrives tagged: {events:?}"
     );
+    // A background subagent's thinking reaches the stream without being
+    // asked (captured lines 62 and 72): it becomes the subagent's reasoning.
+    let thoughts = events
+        .iter()
+        .filter(|e| {
+            matches!(e, AgentEvent::Subagent { parent_tool_use_id, event }
+                if *parent_tool_use_id == spawn_id
+                    && matches!(event.as_ref(), AgentEvent::ReasoningDelta { text } if !text.is_empty()))
+        })
+        .count();
+    assert_eq!(thoughts, 2, "{events:?}");
 }
 
 #[tokio::test]
@@ -744,6 +755,52 @@ async fn captured_live_forked_skill_frames_replay_correctly() {
                     && matches!(event.as_ref(), AgentEvent::Done { status: DoneStatus::Completed, .. })
         )),
         "the skill settles like any spawn: {events:?}"
+    );
+}
+
+#[tokio::test]
+async fn captured_live_forwarded_foreground_subagent_replays_in_order() {
+    // Frames from claude 2.1.310 run with CLAUDE_CODE_FORWARD_SUBAGENT_TEXT=1
+    // (2026-10-24): a foreground Agent told to write a sentence, run `echo hi`,
+    // then write another. Without the variable the CLI sends only its
+    // tool_use and tool_result blocks. Cut like the forked-skill capture, and
+    // the main thread's frames before its Agent call too; the subagent's
+    // second thought is reworded (sanitized).
+    let events = replay_fixture("live-2.1.310-foreground-subagent-forwarded.jsonl").await;
+    let spawn = events
+        .iter()
+        .find_map(|e| match e {
+            AgentEvent::ToolCall { id, call } if call.is_subagent_spawn() => Some(id.clone()),
+            _ => None,
+        })
+        .expect("the Agent call");
+    let shape: Vec<&str> = events
+        .iter()
+        .filter_map(|e| match e {
+            AgentEvent::Subagent {
+                parent_tool_use_id,
+                event,
+            } if *parent_tool_use_id == spawn => match event.as_ref() {
+                AgentEvent::ReasoningDelta { .. } => Some("thinking"),
+                AgentEvent::TextDelta { text } if text.starts_with("The sky is blue.") => {
+                    Some("sky")
+                }
+                AgentEvent::TextDelta { text } if text.starts_with("The grass is green.") => {
+                    Some("grass")
+                }
+                AgentEvent::ToolCall {
+                    call: ToolCall::Exec { command },
+                    ..
+                } if command == "echo hi" => Some("exec"),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        shape,
+        ["thinking", "sky", "exec", "thinking", "grass"],
+        "{events:?}"
     );
 }
 
