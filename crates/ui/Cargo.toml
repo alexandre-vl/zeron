@@ -96,6 +96,10 @@ required-features = ["compact-picker-fixture"]
 name = "question-answers-fixture"
 required-features = ["appshots-fixture"]
 
+[[example]]
+name = "settings-search-fixture"
+required-features = ["appshots-fixture"]
+
 [dependencies]
 zeron-voice-media.workspace = true
 zeron-voice-session.workspace = true
