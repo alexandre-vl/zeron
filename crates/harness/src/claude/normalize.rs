@@ -712,7 +712,7 @@ impl Normalizer {
                     let parent = self.agent_tool_spawns.get(parent).unwrap_or(parent);
                     // Subagent content, attributed. The 2.1.x wire streams NO
                     // tagged partial deltas (live-verified): a subagent's text
-                    // arrives only as full text blocks on its tagged
+                    // and thinking arrive only as full blocks on its tagged
                     // assistant frames — emit them, in block order with the
                     // tool calls, or subagent transcripts are tool-chips-only.
                     let mut out: Vec<AgentEvent> = f
@@ -723,6 +723,12 @@ impl Normalizer {
                                 parent,
                                 AgentEvent::TextDelta {
                                     text: format!("{}\n\n", b.text.trim_end()),
+                                },
+                            )),
+                            "thinking" if !b.thinking.trim().is_empty() => Some(tag(
+                                parent,
+                                AgentEvent::ReasoningDelta {
+                                    text: format!("{}\n\n", b.thinking.trim_end()),
                                 },
                             )),
                             "tool_use" => Some(tag(
@@ -1749,24 +1755,38 @@ mod tests {
     }
 
     #[test]
-    fn subagent_assistant_text_blocks_emit_tagged_text() {
+    fn subagent_assistant_blocks_emit_tagged_reasoning_text_and_calls() {
         // No tagged partial deltas exist on the 2.1.x wire: a subagent's text
-        // arrives only as full blocks on its tagged assistant frames.
+        // and thinking arrive only as full blocks on its tagged assistant
+        // frames. Each ends on a blank line, so blocks that fold together
+        // stay apart; a signature-only thinking block carries nothing.
         let ev = normalize_one(
-            r#"{"type":"assistant","parent_tool_use_id":"toolu_sub","message":{"content":[{"type":"text","text":"working on it"},{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}"#,
+            r#"{"type":"assistant","parent_tool_use_id":"toolu_sub","message":{"content":[{"type":"thinking","thinking":"","signature":"sig"},{"type":"thinking","thinking":"Plan it. "},{"type":"thinking","thinking":"Then list."},{"type":"text","text":"working on it"},{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}"#,
         );
-        assert_eq!(ev.len(), 2);
+        let tagged = |event: AgentEvent| AgentEvent::Subagent {
+            parent_tool_use_id: "toolu_sub".into(),
+            event: Box::new(event),
+        };
         assert_eq!(
-            ev[0],
-            AgentEvent::Subagent {
-                parent_tool_use_id: "toolu_sub".into(),
-                event: Box::new(AgentEvent::TextDelta {
+            ev,
+            [
+                tagged(AgentEvent::ReasoningDelta {
+                    text: "Plan it.\n\n".into()
+                }),
+                tagged(AgentEvent::ReasoningDelta {
+                    text: "Then list.\n\n".into()
+                }),
+                tagged(AgentEvent::TextDelta {
                     text: "working on it\n\n".into()
                 }),
-            }
+                tagged(AgentEvent::ToolCall {
+                    id: "t1".into(),
+                    call: ToolCall::Exec {
+                        command: "ls".into()
+                    },
+                }),
+            ]
         );
-        assert!(matches!(&ev[1], AgentEvent::Subagent { event, .. }
-            if matches!(event.as_ref(), AgentEvent::ToolCall { .. })));
     }
 
     #[test]
