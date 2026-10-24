@@ -126,8 +126,9 @@ fun FloatingNavBar(items: List<NavItem>, modifier: Modifier = Modifier, trailing
         ) {
             Row(Modifier.padding(6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 for (item in items) {
+                    val tone = MaterialTheme.colorScheme.secondaryContainer
                     val bg by animateColorAsState(
-                        if (item.selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+                        if (item.selected) tone else tone.copy(alpha = 0f),
                         MaterialTheme.motionScheme.defaultEffectsSpec(),
                         label = "nav",
                     )
@@ -202,8 +203,10 @@ val FloatingChromePadding = PaddingValues(bottom = 176.dp)
 fun BoxScope.StatusBarScrim(list: LazyListState) {
     // Derived: a raw scroll-offset read would recompose the calling screen on every scroll frame.
     val scrolled by remember(list) { derivedStateOf { list.firstVisibleItemIndex > 0 || list.firstVisibleItemScrollOffset > 0 } }
+    // Fades from the page tone at zero alpha: Color.Transparent is black, so mid-fade is a grey band.
+    val background = MaterialTheme.colorScheme.background
     val color by animateColorAsState(
-        if (scrolled) MaterialTheme.colorScheme.background else Color.Transparent,
+        if (scrolled) background else background.copy(alpha = 0f),
         label = "status-scrim",
     )
     Box(
