@@ -71,6 +71,8 @@ data class LaunchOptions(
     val companion: String? = null,
     /** `--ez terminal-demo true`: the opened terminal types a short script. */
     val terminalDemo: Boolean = false,
+    /** `--ez cloud true`: offer Cloud in the demo (its pages read the demo's Cloud). */
+    val cloud: Boolean = false,
     val wallpaper: String? = null,
     val wallpaperEffect: String? = null,
     /** `--ez voice-preview true`: the scripted call (debuggable builds). */
@@ -183,6 +185,7 @@ class AppModel(private val app: Application) {
                     .putString("draft.harness", value.harness)
                     .putString("draft.model", value.model)
                     .putString("draft.effort", value.effort)
+                    .putBoolean("draft.cloud", value.cloud)
                     .apply()
             }
         }
@@ -193,6 +196,7 @@ class AppModel(private val app: Application) {
         harness = settings.getString("draft.harness", null) ?: "claude-code",
         model = settings.getString("draft.model", null),
         effort = settings.getString("draft.effort", null),
+        cloud = settings.getBoolean("draft.cloud", false),
     )
 
     var launch = LaunchOptions()
@@ -289,6 +293,7 @@ class AppModel(private val app: Application) {
             _client.value = client
             refreshWorkspace()
             client.preloadSessions()
+            cloud.refresh()
             backfillProfile()
             true
         } catch (e: Exception) {
@@ -392,6 +397,7 @@ class AppModel(private val app: Application) {
         endDeliveryHold()
         lastDeliveryActivity = 0L
         terminals.signOut()
+        cloud.reset()
         _client.value?.shutdown()
         _client.value = null
         _workspace.value = null
@@ -563,6 +569,15 @@ class AppModel(private val app: Application) {
 
     // ── companions (side chats, subagents, terminals) ──────────────────────
 
+    /** Cloud for this account (status, GitHub, agent logins, billing). */
+    val cloud = CloudStore(scope, { _client.value }, { refreshWorkspace() })
+
+    /** Pages opened in the browser that hand back through a `zeron://` link. */
+    val browser = BrowserReturns()
+
+    /** Cloud is offered here (the demo shows it with `--ez cloud true`). */
+    val cloudOffered: Boolean get() = if (isDemo) launch.cloud else cloud.available
+
     /** Every chat's terminals (shells on their hosts). */
     val terminals = TerminalStore(app) { _client.value }
 
@@ -637,6 +652,30 @@ class AppModel(private val app: Application) {
         drafts.save(chatId, if (draft.isEmpty()) text else draft + "\n" + text)
     }
 
+    /** A Cloud chat created whose first message didn't go out yet (key → chat). */
+    private var unsentCloudChat: Pair<String, String>? = null
+
+    /**
+     * A session on its own Cloud machine in `draft.projectId` (a Cloud
+     * project, or any project whose repository Cloud reaches): the edge mints
+     * the machine, then the first message is sent as usual — it waits in the
+     * chat until the machine is up.
+     */
+    suspend fun createCloudSession(draft: NewSessionDraft, text: String, attachments: List<uniffi.zeron_core.OutgoingAttachment>): String {
+        val client = _client.value ?: throw uniffi.zeron_core.CoreException.Closed()
+        val spaceId = draft.projectId ?: throw uniffi.zeron_core.CoreException.InvalidArgument("Choose a project")
+        val config = ChatConfig(draft.harness, draft.model, draft.effort, emptyMap(), SandboxLevel.WORKSPACE_WRITE)
+        // A retry after a failed first send reuses that chat (and machine), while nothing it was made with changed.
+        val key = "$spaceId|${draft.branch.orEmpty()}|${draft.harness}|${draft.model.orEmpty()}"
+        val chatId = unsentCloudChat?.takeIf { it.first == key && client.sessionRow(it.second) != null }?.second
+            ?: client.createCloudSession(spaceId, config, draft.branch, null).also { unsentCloudChat = key to it }
+        client.openSession(chatId).send(SendRequest(text, attachments, null, BusyPolicy.QUEUE))
+        unsentCloudChat = null
+        noteDeliveryActivity()
+        refreshWorkspace()
+        return chatId
+    }
+
     /** Create the chat and send its first message. */
     fun createSession(draft: NewSessionDraft, text: String, attachments: List<uniffi.zeron_core.OutgoingAttachment> = emptyList()): String? {
         val client = _client.value ?: return null
@@ -699,4 +738,6 @@ data class NewSessionDraft(
     val effort: String? = null,
     val branch: String? = null,
     val worktree: Boolean = false,
+    /** Run on its own Cloud machine (a project whose repository Cloud reaches). */
+    val cloud: Boolean = false,
 )

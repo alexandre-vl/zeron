@@ -104,7 +104,15 @@ fun terminalBackground(): Color = if (LocalDarkTheme.current) Color(0xFF090909) 
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-fun TerminalScreen(model: AppModel, chatId: String, terminalId: String? = null, onBack: () -> Unit, script: List<String> = emptyList()) {
+fun TerminalScreen(
+    model: AppModel,
+    chatId: String,
+    terminalId: String? = null,
+    onBack: () -> Unit,
+    script: List<String> = emptyList(),
+    /** The keyboard comes up with a new shell on a phone; beside other columns it waits for a tap. */
+    raiseKeyboard: Boolean = true,
+) {
     val client by model.client.collectAsState()
     val context = LocalContext.current
     val view = LocalView.current
@@ -150,7 +158,7 @@ fun TerminalScreen(model: AppModel, chatId: String, terminalId: String? = null, 
                 val tab = store.open(chatId, cols, rows)
                 view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
                 show(tab)
-                view.post { terminal?.showKeyboard() }
+                if (raiseKeyboard) view.post { terminal?.showKeyboard() }
                 // A screenshot script to type once the shell is up (debug launch extra).
                 val lines = pendingScript
                 pendingScript = emptyList()

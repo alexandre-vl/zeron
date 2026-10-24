@@ -57,6 +57,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.graphics.ImageBitmap
@@ -106,6 +108,11 @@ fun SessionScreen(
     onOpenSubagent: (parentId: String, docId: String, title: String, running: Boolean) -> Unit = { _, _, _, _ -> },
     /** Debug launch extra: open a companion once the session is up (`companions`, `terminal`, `side-chat:<id>`, `subagent:<tool id>`). */
     openCompanion: String? = null,
+    /** An agent's logins (an error card's "Log in": `signIn` starts one at once). */
+    onOpenAccounts: (AccountsTarget, signIn: Boolean) -> Unit = { _, _ -> },
+    onOpenBilling: () -> Unit = {},
+    /** Companions open beside the session (the large-screen inspector) instead of over it. */
+    onShowCompanions: ((CompanionSection?) -> Unit)? = null,
 ) {
     val client by model.client.collectAsState()
     val core = client ?: return
@@ -179,6 +186,8 @@ fun SessionScreen(
             showText = { title, text, mono -> sheet = TextSheet(title, text, mono) },
             openImage = open,
             openSubagent = { doc, title, running -> onOpenSubagent(chatId, doc, title, running) },
+            // An error card's "Log in": that agent's sign-in, started at once.
+            act = { action -> if (action == "sign-in") signInTarget(model, chatId)?.let { onOpenAccounts(it, true) } },
         )
     }
     // The composer's draft outlives the panel that replaces it while the agent asks.
@@ -195,6 +204,10 @@ fun SessionScreen(
 
     // Companions: subagents, side chats (a side chat's siblings live with its parent), terminals.
     val parentId = row?.parentChatId
+    val isCloud = row?.isCloud == true
+    val cloudOutOfCredits = isCloud && model.cloud.outOfCredits
+    var nudges by remember { mutableIntStateOf(0) }
+    LaunchedEffect(isCloud) { if (isCloud && model.cloud.info == null) model.cloud.refresh() }
     val companions = rememberCompanions(model, chatId, includeSideChats = parentId == null)
     var companionsSheet by remember { mutableStateOf<CompanionSection?>(null) }
     var showCompanions by remember { mutableStateOf(false) }
@@ -221,7 +234,7 @@ fun SessionScreen(
         val which = openCompanion ?: return@LaunchedEffect
         delay(800)
         when {
-            which == "companions" -> showCompanions = true
+            which == "companions" -> onShowCompanions?.invoke(null) ?: run { showCompanions = true }
             which == "terminal" -> onOpenTerminal(chatId, null)
             which.startsWith("side-chat:") -> onOpenSideChat(which.removePrefix("side-chat:"))
             which.startsWith("subagent:") -> {
@@ -277,7 +290,7 @@ fun SessionScreen(
                         }
                     },
                 ) {
-                    TonalCircleButton(ZIcons.Companions, "Agents, side chats and terminals", onClick = { showCompanions = true }, container = MaterialTheme.colorScheme.surfaceContainerHighest)
+                    TonalCircleButton(ZIcons.Companions, "Agents, side chats and terminals", onClick = { onShowCompanions?.invoke(null) ?: run { showCompanions = true } }, container = MaterialTheme.colorScheme.surfaceContainerHighest)
                 }
                 androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp))
                 Box {
@@ -326,16 +339,24 @@ fun SessionScreen(
             }
         }
         Column(Modifier.fillMaxWidth().imePadding().navigationBarsPadding()) {
+            // A Cloud chat out of credits says so once, above the composer.
+            androidx.compose.animation.AnimatedVisibility(cloudOutOfCredits) {
+                CloudCreditsNotice(nudges, onAddCredits = onOpenBilling)
+            }
             Row(Modifier.fillMaxWidth().padding(end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f)) { Banner(composer, connectivity?.state, onRetry = { runCatching { handle.retryDelivery() } }) }
-                CompanionStrip(companions, onTap = { companionsSheet = it; showCompanions = true }, modifier = if (companions.isEmpty) Modifier else Modifier.padding(vertical = 6.dp))
+                Box(Modifier.weight(1f)) { Banner(composer, connectivity?.state, onRetry = { runCatching { handle.retryDelivery() } }, cloud = if (isCloud) model.cloud else null, chatId = chatId, deviceId = row?.deviceId) }
+                CompanionStrip(companions, onTap = { section -> onShowCompanions?.invoke(section) ?: run { companionsSheet = section; showCompanions = true } }, modifier = if (companions.isEmpty) Modifier else Modifier.padding(vertical = 6.dp))
             }
             val input = composer.openInput
             // The panel replaces the composer while the agent asks.
             if (input != null) {
                 QuestionPanel(input) { answers -> runCatching { handle.respondInput(input.requestId, answers) } }
             } else {
-                Composer(model, core, handle, composer, row, transcript, draft)
+                Composer(model, core, handle, composer, row, transcript, draft, beforeSend = {
+                    // Out of credits, a Cloud send can't wake its machine: say so instead of a send that never lands.
+                    if (cloudOutOfCredits) nudges++
+                    !cloudOutOfCredits
+                })
             }
         }
     }
@@ -402,7 +423,7 @@ fun SessionScreen(
 
 /** The status pill above the composer (iOS SessionChrome banner). */
 @Composable
-private fun Banner(c: ComposerState, connectivity: ConnectivityState?, onRetry: () -> Unit) {
+private fun Banner(c: ComposerState, connectivity: ConnectivityState?, onRetry: () -> Unit, cloud: sh.zeron.android.core.CloudStore? = null, chatId: String = "", deviceId: String? = null) {
     // Reconnect countdowns tick each second.
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     val retryAt = c.room.retryAtMs
@@ -414,6 +435,13 @@ private fun Banner(c: ComposerState, connectivity: ConnectivityState?, onRetry: 
             }
         }
     }
+    // A Cloud chat whose send can't land says why: out of credits the notice
+    // above already does; a failed machine is named.
+    if (cloud != null && c.sendState == SendState.FAILED) {
+        LaunchedEffect(Unit) { cloud.refreshSessions() }
+        if (cloud.outOfCredits) return
+        cloud.sessionError(chatId, deviceId)?.let { return StatusBanner("Cloud machine: $it", "Retry" to onRetry) }
+    }
     val text = when {
         c.sendState == SendState.FAILED -> "Not delivered"
         c.sendState == SendState.QUEUED -> "${c.host.name ?: "Host"} is offline — will send when it's back"
@@ -423,4 +451,40 @@ private fun Banner(c: ComposerState, connectivity: ConnectivityState?, onRetry: 
         else -> null
     } ?: return
     StatusBanner(text, if (c.sendState == SendState.FAILED) "Retry" to onRetry else null)
+}
+
+/** Whose logins an error card's "Log in" opens: Cloud's for a Cloud chat, else the host's. */
+fun signInTarget(model: AppModel, chatId: String): AccountsTarget? {
+    val row = model.row(chatId) ?: return null
+    val harness = row.harness ?: "claude-code"
+    if (row.isCloud) return sh.zeron.android.core.CloudStore.agents.firstOrNull { it.harness == harness }?.let { AccountsTarget.Cloud(it) }
+    val label = row.harnessLabel ?: uniffi.zeron_core.agentLoginRules(harness).name.ifEmpty { harness }
+    return AccountsTarget.Device(row.deviceId, model.deviceName(row.deviceId), harness, label)
+}
+
+/** "Out of Cloud credits" with its one way forward; a refused send shakes it. */
+@Composable
+private fun CloudCreditsNotice(nudges: Int, onAddCredits: () -> Unit) {
+    val shake = remember { androidx.compose.animation.core.Animatable(0f) }
+    val view = androidx.compose.ui.platform.LocalView.current
+    LaunchedEffect(nudges) {
+        if (nudges == 0) return@LaunchedEffect
+        view.performHapticFeedback(android.view.HapticFeedbackConstants.REJECT)
+        for (x in listOf(-8f, 8f, -5f, 5f, -2f, 0f)) shake.animateTo(x, androidx.compose.animation.core.tween(50))
+    }
+    Surface(
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(50),
+        color = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        modifier = Modifier
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .graphicsLayer { translationX = shake.value * density },
+    ) {
+        Row(Modifier.padding(start = 16.dp, end = 6.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            ZIcon(ZIcons.Warning, null, Modifier.size(18.dp))
+            androidx.compose.foundation.layout.Spacer(Modifier.size(10.dp))
+            Text(sh.zeron.android.core.CloudStore.OUT_OF_CREDITS, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+            androidx.compose.material3.Button(onClick = onAddCredits, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp)) { Text("Add credits") }
+        }
+    }
 }

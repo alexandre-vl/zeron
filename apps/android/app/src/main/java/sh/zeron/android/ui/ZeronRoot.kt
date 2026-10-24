@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.BottomAppBar
 import androidx.compose.material3.BottomAppBarDefaults
@@ -52,6 +53,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.isAltPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
@@ -96,9 +98,18 @@ object Routes {
     const val ARCHIVED = "archived"
     const val VOICE = "voice"
     const val VOICE_SETTINGS = "voice-settings"
+    const val PROVIDERS = "providers?target={target}"
+    const val CLOUD = "cloud"
+    const val BILLING = "billing"
+    const val CLOUD_REPOS = "cloud-repos"
+    const val ACCOUNTS = "accounts/{target}?signin={signin}"
+    const val WELCOME = "welcome?step={step}"
     const val TERMINAL = "terminal/{chat}?id={id}"
     const val SUBAGENT = "subagent/{parent}/{doc}?title={title}&running={running}"
     fun chat(id: String) = "chat/$id"
+    fun providers(target: String?) = "providers" + (target?.let { "?target=${Uri.encode(it)}" } ?: "")
+    fun accounts(target: String, signIn: Boolean) = "accounts/${Uri.encode(target)}?signin=$signIn"
+    fun welcome(step: String?) = "welcome" + (step?.let { "?step=${Uri.encode(it)}" } ?: "")
     fun terminal(chat: String, id: String?) = "terminal/${Uri.encode(chat)}" + (id?.let { "?id=${Uri.encode(it)}" } ?: "")
     fun subagent(parent: String, doc: String, title: String, running: Boolean) =
         "subagent/${Uri.encode(parent)}/${Uri.encode(doc)}?title=${Uri.encode(title)}&running=$running"
@@ -107,29 +118,60 @@ object Routes {
 @Composable
 private fun MainNav(model: AppModel) {
     val nav = rememberNavController()
+    val context = androidx.compose.ui.platform.LocalContext.current
     // Large screens (tablets, unfolded foldables): sessions beside the open chat.
     androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
     // (Width alone would split a phone turned sideways.)
-    val wide = maxWidth >= 840.dp && maxHeight >= 480.dp
-    var selected by rememberSaveable { mutableStateOf<String?>(null) }
-    val open: (String) -> Unit = { id -> if (wide) selected = id else nav.navigate(Routes.chat(id)) }
-    // Folding back to a phone keeps the open chat, full screen.
+    // From about an iPad mini in portrait up (iPad shows its split there too).
+    val wide = maxWidth >= 700.dp && maxHeight >= 480.dp
+    val roomy = maxWidth >= 1100.dp
+    val sidebarWidth = if (maxWidth < 1000.dp) 320.dp else 380.dp
+    val shell = remember { TabletShellState() }
+    val open: (String) -> Unit = { id -> if (wide) shell.select(id) else nav.navigate(Routes.chat(id)) }
+    // Folding back to a phone keeps the open chat, full screen; unfolding brings it beside the list.
     LaunchedEffect(wide) {
-        val id = selected
-        if (!wide && id != null) {
-            selected = null
+        if (!wide) {
+            val id = shell.selected ?: return@LaunchedEffect
+            shell.select(null)
             nav.navigate(Routes.chat(id))
+        } else {
+            val entry = nav.currentBackStackEntry ?: return@LaunchedEffect
+            if (entry.destination.route == Routes.CHAT) {
+                val id = entry.arguments?.getString("id")
+                nav.popBackStack(Routes.HOME, inclusive = false)
+                shell.select(id)
+            }
         }
     }
     LaunchedEffect(Unit) {
-        when (val route = model.launch.route) {
-            null -> Unit
-            "new" -> nav.navigate(Routes.NEW)
-            "search" -> nav.navigate(Routes.SEARCH)
-            "settings", "more" -> nav.navigate(Routes.SETTINGS)
+        val route = model.launch.route ?: return@LaunchedEffect
+        val parts = route.split(':')
+        when (parts[0]) {
+            "new" -> if (wide) shell.newSession() else nav.navigate(Routes.NEW)
+            "search" -> if (wide) shell.searching = true else nav.navigate(Routes.SEARCH)
+            "settings", "more" -> if (wide) shell.settings = Routes.SETTINGS else nav.navigate(Routes.SETTINGS)
             "archived" -> nav.navigate(Routes.ARCHIVED)
-            else -> if (route.startsWith("chat:")) nav.navigate(Routes.chat(route.removePrefix("chat:")))
+            "chat" -> open(route.removePrefix("chat:"))
+            "welcome" -> nav.navigate(Routes.welcome(parts.getOrNull(1)))
+            // Cloud pages straight away (screenshots, tests): `cloud` · `cloud:billing` ·
+            // `cloud:repos` · `billing` · `providers[:cloud|:<device id>]` · `accounts:<target>`.
+            "cloud", "billing", "providers", "accounts" -> {
+                val target = when {
+                    parts[0] == "cloud" && parts.getOrNull(1) == "billing" -> Routes.BILLING
+                    parts[0] == "cloud" && parts.getOrNull(1) == "repos" -> Routes.CLOUD_REPOS
+                    parts[0] == "cloud" -> Routes.CLOUD
+                    parts[0] == "billing" -> Routes.BILLING
+                    parts[0] == "providers" -> Routes.providers(parts.getOrNull(1))
+                    else -> Routes.accounts(route.removePrefix("accounts:"), signIn = false)
+                }
+                if (wide) shell.settings = target else nav.navigate(target)
+            }
         }
+    }
+    // First run after signing in: the welcome pages (once per account).
+    val client by model.client.collectAsState()
+    LaunchedEffect(client) {
+        if (client != null && model.launch.route == null && shouldShowOnboarding(context, model)) nav.navigate(Routes.welcome(null))
     }
     // The notification, a snackbar Retry or `voice-stage` asks for the call.
     LaunchedEffect(Unit) {
@@ -140,9 +182,9 @@ private fun MainNav(model: AppModel) {
     // A debug `companion` extra opens over the launch route's chat, once.
     var companionPending by rememberSaveable { mutableStateOf(model.launch.companion) }
 
-    /** A session page with its companions wired to the nav stack. */
+    /** A session page with its companions wired to the nav stack (phone) or the inspector (large screens). */
     @Composable
-    fun Session(id: String, onBack: () -> Unit) {
+    fun Session(id: String, onBack: () -> Unit, beside: Boolean = false) {
         val launchChat = model.launch.route?.removePrefix("chat:")
         SessionScreen(
             model,
@@ -150,20 +192,33 @@ private fun MainNav(model: AppModel) {
             onBack = onBack,
             onOpenVoice = { nav.navigate(Routes.VOICE) { launchSingleTop = true } },
             onVoiceSettings = { nav.navigate(Routes.VOICE_SETTINGS) },
-            onOpenSideChat = { nav.navigate(Routes.chat(it)) },
-            onOpenTerminal = { chat, terminal -> nav.navigate(Routes.terminal(chat, terminal)) },
-            onOpenSubagent = { parent, doc, title, running -> nav.navigate(Routes.subagent(parent, doc, title, running)) },
+            onOpenSideChat = { side -> if (beside) shell.push(id, InspectorPage.SideChat(side)) else nav.navigate(Routes.chat(side)) },
+            onOpenTerminal = { chat, terminal -> if (beside) shell.push(chat, InspectorPage.Terminal(terminal)) else nav.navigate(Routes.terminal(chat, terminal)) },
+            onOpenSubagent = { parent, doc, title, running ->
+                if (beside) shell.push(id, InspectorPage.Subagent(parent, doc, title, running)) else nav.navigate(Routes.subagent(parent, doc, title, running))
+            },
             openCompanion = companionPending?.takeIf { id == launchChat }?.also { companionPending = null },
+            onOpenAccounts = { target, signIn -> nav.navigate(Routes.accounts(target.encode(), signIn)) },
+            onOpenBilling = { if (wide) shell.settings = Routes.BILLING else nav.navigate(Routes.BILLING) },
+            onShowCompanions = if (beside) ({ section -> shell.toggleCompanions(id, section) }) else null,
         )
     }
 
     Box(
         Modifier.fillMaxSize().onPreviewKeyEvent { e ->
-            // Hardware keyboards: Ctrl+N new session, Ctrl+Shift+F search (iPad ⌘N / ⌘⇧F).
+            // Hardware keyboards (iPad's): Ctrl+N new session, Ctrl+Shift+F search, Ctrl+B sidebar,
+            // Ctrl+J terminal, Ctrl+Alt+0 agents, side chats and terminals.
             if (e.type != KeyEventType.KeyDown || !(e.isCtrlPressed || e.isMetaPressed)) return@onPreviewKeyEvent false
+            val chat = if (wide) shell.selected else nav.currentBackStackEntry?.takeIf { it.destination.route == Routes.CHAT }?.arguments?.getString("id")
             when {
-                e.key == Key.N -> nav.navigate(Routes.NEW).let { true }
-                e.key == Key.F && e.isShiftPressed -> nav.navigate(Routes.SEARCH).let { true }
+                e.key == Key.N -> true.also { if (wide) shell.newSession() else nav.navigate(Routes.NEW) }
+                e.key == Key.F && e.isShiftPressed -> true.also { if (wide) shell.searching = true else nav.navigate(Routes.SEARCH) }
+                e.key == Key.B && wide -> true.also { shell.sidebar = !shell.sidebar }
+                e.key == Key.J && chat != null -> true.also {
+                    val live = model.terminals.tabs(chat).firstOrNull { it.isLive }?.ref?.id
+                    if (wide) shell.push(chat, InspectorPage.Terminal(live)) else nav.navigate(Routes.terminal(chat, live))
+                }
+                e.key == Key.Zero && e.isAltPressed && chat != null && wide -> true.also { shell.toggleCompanions(chat, null) }
                 else -> false
             }
         },
@@ -171,39 +226,61 @@ private fun MainNav(model: AppModel) {
     NavHost(nav, startDestination = Routes.HOME) {
         composable(Routes.HOME) {
             if (!wide) {
-                Home(model, nav, open)
-            } else {
-                Row(Modifier.fillMaxSize()) {
-                    Box(Modifier.width(400.dp).fillMaxHeight()) { Home(model, nav, open, selected) }
-                    androidx.compose.material3.VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    Box(Modifier.weight(1f).fillMaxHeight()) {
-                        val id = selected
-                        if (id != null) {
-                            key(id) { Session(id, onBack = { selected = null }) }
-                        } else {
-                            Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                                ZIcon(ZIcons.Chat, null, Modifier.size(40.dp), tint = MaterialTheme.colorScheme.outline)
-                                androidx.compose.foundation.layout.Spacer(Modifier.size(12.dp))
-                                Text("Pick a session, or start a new one", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        composable(Routes.ARCHIVED) {
-            ArchivedScreen(model, onBack = { nav.popBackStack() }, onOpen = { nav.navigate(Routes.chat(it)) })
-        }
-        composable(Routes.SETTINGS) {
-            Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-                SettingsScreen(
+                Home(
                     model,
+                    open,
+                    onSettings = { nav.navigate(Routes.SETTINGS) },
+                    onSearch = { nav.navigate(Routes.SEARCH) },
+                    onNew = { nav.navigate(Routes.NEW) },
                     onArchived = { nav.navigate(Routes.ARCHIVED) },
-                    onOpenVoiceSettings = { nav.navigate(Routes.VOICE_SETTINGS) },
-                    onBack = { nav.popBackStack() },
+                    onVoice = { nav.navigate(Routes.VOICE) { launchSingleTop = true } },
+                    onVoiceSettings = { nav.navigate(Routes.VOICE_SETTINGS) },
+                )
+            } else {
+                TabletShell(
+                    model,
+                    shell,
+                    roomy = roomy,
+                    // About a phone's width; narrower windows hold it at its minimum.
+                    sidebarWidth = sidebarWidth,
+                    sidebar = {
+                        if (shell.searching) {
+                            SearchScreen(model, onBack = { shell.searching = false }, onOpen = { id ->
+                                shell.searching = false
+                                open(id)
+                            })
+                        } else {
+                            Home(
+                                model,
+                                open,
+                                selected = shell.selected,
+                                onSettings = { shell.settings = Routes.SETTINGS },
+                                onSearch = { shell.searching = true },
+                                onNew = { shell.newSession() },
+                                onArchived = { shell.settings = Routes.ARCHIVED },
+                                onVoice = { nav.navigate(Routes.VOICE) { launchSingleTop = true } },
+                                onVoiceSettings = { nav.navigate(Routes.VOICE_SETTINGS) },
+                            )
+                        }
+                    },
+                    session = { id -> Session(id, onBack = { shell.select(null) }, beside = true) },
+                    draft = {
+                        NewSessionScreen(
+                            model,
+                            onClose = null,
+                            onCreated = { id -> shell.select(id) },
+                            onOpenBilling = { shell.settings = Routes.BILLING },
+                            focusOnAppear = shell.draftToken > 0,
+                        )
+                    },
+                    page = { chat, page -> InspectorPageContent(model, shell, chat, page) },
                 )
             }
         }
+        settingsGraph(nav, model, openChat = { id ->
+            nav.popBackStack(Routes.HOME, inclusive = false)
+            open(id)
+        })
         composable(Routes.CHAT) { entry ->
             val id = entry.arguments?.getString("id") ?: return@composable
             Session(id, onBack = { nav.popBackStack() })
@@ -218,7 +295,7 @@ private fun MainNav(model: AppModel) {
                 chat,
                 terminalId = entry.arguments?.getString("id"),
                 onBack = { nav.popBackStack() },
-                script = if (model.launch.terminalDemo) listOf("git log --oneline -5", "cargo test -p zeron-veil") else emptyList(),
+                script = if (model.launch.terminalDemo) TERMINAL_DEMO else emptyList(),
             )
         }
         composable(
@@ -252,14 +329,16 @@ private fun MainNav(model: AppModel) {
                 wallpaper = model.wallpaper,
             )
         }
-        composable(Routes.VOICE_SETTINGS) {
-            sh.zeron.android.voice.VoiceSettingsScreen(model.voice, onBack = { nav.popBackStack() })
-        }
         composable(Routes.NEW) {
-            NewSessionScreen(model, onClose = { nav.popBackStack() }, onCreated = { id ->
-                nav.popBackStack()
-                open(id)
-            })
+            NewSessionScreen(
+                model,
+                onClose = { nav.popBackStack() },
+                onCreated = { id ->
+                    nav.popBackStack()
+                    open(id)
+                },
+                onOpenBilling = { nav.navigate(Routes.BILLING) },
+            )
         }
         composable(Routes.SEARCH) {
             SearchScreen(model, onBack = { nav.popBackStack() }, onOpen = { id ->
@@ -267,9 +346,112 @@ private fun MainNav(model: AppModel) {
                 open(id)
             })
         }
+        composable(Routes.WELCOME, arguments = listOf(navArgument("step") { type = NavType.StringType; nullable = true })) { entry ->
+            OnboardingScreen(model, entry.arguments?.getString("step")) { startSession ->
+                nav.popBackStack()
+                if (startSession) {
+                    if (wide) shell.newSession() else nav.navigate(Routes.NEW)
+                }
+            }
+        }
+    }
+    // Settings on a large screen: a dialog over the shell with its own pages (iPad's form sheet).
+    shell.settings?.let { start ->
+        SettingsDialog(model, start, onDismiss = { shell.settings = null }, openChat = { id ->
+            shell.settings = null
+            open(id)
+        })
     }
     Toasts(model, nav)
     }
+    }
+}
+
+private val TERMINAL_DEMO = listOf("git log --oneline -5", "cargo test -p zeron-veil")
+
+/**
+ * Settings and the pages it leads to (Providers, Cloud, Billing, an agent's
+ * logins, Archived, voice): on the phone's stack, or in the large-screen
+ * Settings dialog's own. `onClose` ends the dialog from its first page.
+ */
+private fun androidx.navigation.NavGraphBuilder.settingsGraph(
+    nav: NavHostController,
+    model: AppModel,
+    openChat: (String) -> Unit,
+    onClose: (() -> Unit)? = null,
+) {
+    fun back() {
+        if (!nav.popBackStack()) onClose?.invoke()
+    }
+    composable(Routes.SETTINGS) {
+        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+            SettingsScreen(
+                model,
+                onArchived = { nav.navigate(Routes.ARCHIVED) },
+                onOpenVoiceSettings = { nav.navigate(Routes.VOICE_SETTINGS) },
+                onBack = ::back,
+                onOpenProviders = { nav.navigate(Routes.providers(null)) },
+                onOpenCloud = { nav.navigate(Routes.CLOUD) },
+                onOpenBilling = { nav.navigate(Routes.BILLING) },
+            )
+        }
+    }
+    composable(Routes.ARCHIVED) {
+        ArchivedScreen(model, onBack = ::back, onOpen = openChat)
+    }
+    composable(Routes.VOICE_SETTINGS) {
+        sh.zeron.android.voice.VoiceSettingsScreen(model.voice, onBack = ::back)
+    }
+    composable(Routes.PROVIDERS, arguments = listOf(navArgument("target") { type = NavType.StringType; nullable = true })) { entry ->
+        ProvidersScreen(
+            model,
+            entry.arguments?.getString("target"),
+            onBack = ::back,
+            onOpenAccounts = { target -> nav.navigate(Routes.accounts(target.encode(), signIn = false)) },
+            onOpenCloud = { nav.navigate(Routes.CLOUD) },
+        )
+    }
+    composable(Routes.CLOUD) {
+        CloudSettingsScreen(
+            model,
+            onBack = ::back,
+            onOpenBilling = { nav.navigate(Routes.BILLING) },
+            onOpenAccounts = { target -> nav.navigate(Routes.accounts(target.encode(), signIn = false)) },
+            onOpenRepoPicker = { nav.navigate(Routes.CLOUD_REPOS) },
+        )
+    }
+    composable(Routes.BILLING) {
+        BillingScreen(model, onBack = ::back)
+    }
+    composable(Routes.CLOUD_REPOS) {
+        CloudRepoPickerScreen(model, onBack = ::back, onCreated = { back() })
+    }
+    composable(
+        Routes.ACCOUNTS,
+        arguments = listOf(navArgument("target") { type = NavType.StringType }, navArgument("signin") { type = NavType.BoolType; defaultValue = false }),
+    ) { entry ->
+        val target = entry.arguments?.getString("target")?.let { AccountsTarget.decode(it, model::deviceName) } ?: return@composable
+        AgentAccountsScreen(model, target, signIn = entry.arguments?.getBoolean("signin") == true, onBack = ::back)
+    }
+}
+
+/** Large screens: Settings over the shell as a dialog with its own stack of pages. */
+@Composable
+private fun SettingsDialog(model: AppModel, start: String, onDismiss: () -> Unit, openChat: (String) -> Unit) {
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        val nav = rememberNavController()
+        Surface(
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp),
+            color = MaterialTheme.colorScheme.background,
+            modifier = Modifier.fillMaxWidth(0.9f).widthIn(max = 720.dp).fillMaxHeight(0.92f),
+        ) {
+            NavHost(nav, startDestination = start) {
+                settingsGraph(nav, model, openChat = openChat, onClose = onDismiss)
+            }
+        }
     }
 }
 
@@ -292,6 +474,7 @@ private fun androidx.compose.foundation.layout.BoxScope.Toasts(model: AppModel, 
         Routes.HOME -> 96.dp
         Routes.CHAT, Routes.NEW -> 96.dp
         Routes.TERMINAL, Routes.SUBAGENT -> 72.dp
+        Routes.WELCOME -> 120.dp
         else -> 16.dp
     }
     SnackbarHost(host, Modifier.align(Alignment.BottomCenter).imePadding().navigationBarsPadding().padding(bottom = inset))
@@ -305,27 +488,37 @@ private fun androidx.compose.foundation.layout.BoxScope.Toasts(model: AppModel, 
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-private fun Home(model: AppModel, nav: NavHostController, open: (String) -> Unit, selected: String? = null) {
+private fun Home(
+    model: AppModel,
+    open: (String) -> Unit,
+    selected: String? = null,
+    onSettings: () -> Unit,
+    onSearch: () -> Unit,
+    onNew: () -> Unit,
+    onArchived: () -> Unit,
+    onVoice: () -> Unit,
+    onVoiceSettings: () -> Unit,
+) {
     val bar = BottomAppBarDefaults.exitAlwaysScrollBehavior()
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Box(Modifier.fillMaxSize().nestedScroll(bar.nestedScrollConnection)) {
-            SessionsScreen(model, onOpen = open, onArchived = { nav.navigate(Routes.ARCHIVED) }, selected = selected)
+            SessionsScreen(model, onOpen = open, onArchived = onArchived, selected = selected)
         }
         val voice = sh.zeron.android.voice.rememberVoiceVisible(model.voice)
         BottomAppBar(
             actions = {
                 Tip("Settings") {
-                    IconButton(onClick = { nav.navigate(Routes.SETTINGS) }) { ZIcon(ZIcons.Settings, "Settings", Modifier.size(24.dp)) }
+                    IconButton(onClick = onSettings) { ZIcon(ZIcons.Settings, "Settings", Modifier.size(24.dp)) }
                 }
                 Tip("Search") {
-                    IconButton(onClick = { nav.navigate(Routes.SEARCH) }) { ZIcon(ZIcons.Search, "Search", Modifier.size(24.dp)) }
+                    IconButton(onClick = onSearch) { ZIcon(ZIcons.Search, "Search", Modifier.size(24.dp)) }
                 }
                 if (voice) {
                     // Tap calls (or opens the live call); hold picks the host and style.
                     sh.zeron.android.voice.VoiceHeaderButton(
                         model.voice,
-                        onOpenStage = { nav.navigate(Routes.VOICE) { launchSingleTop = true } },
-                        onOpenSettings = { nav.navigate(Routes.VOICE_SETTINGS) },
+                        onOpenStage = onVoice,
+                        onOpenSettings = onVoiceSettings,
                         size = 48.dp,
                         container = Color.Transparent,
                     )
@@ -334,7 +527,7 @@ private fun Home(model: AppModel, nav: NavHostController, open: (String) -> Unit
             floatingActionButton = {
                 Tip("New session") {
                     FloatingActionButton(
-                        onClick = { nav.navigate(Routes.NEW) },
+                        onClick = onNew,
                         containerColor = MaterialTheme.colorScheme.primary,
                         contentColor = MaterialTheme.colorScheme.onPrimary,
                         elevation = androidx.compose.material3.FloatingActionButtonDefaults.bottomAppBarFabElevation(),

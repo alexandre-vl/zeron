@@ -44,6 +44,9 @@
                 <data android:scheme="zeron" android:host="callback" />
                 <!-- zeron://voice returns to the call (iOS parity). -->
                 <data android:host="voice" />
+                <!-- Cloud: a provider sign-in, GitHub or Stripe hands back here. -->
+                <data android:host="signed-in" />
+                <data android:host="cloud" />
             </intent-filter>
         </activity>
         <provider

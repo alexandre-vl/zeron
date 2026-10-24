@@ -181,8 +181,45 @@ fun CompanionsSheet(
     onOpenSideChat: (String) -> Unit,
     onOpenTerminal: (TerminalTab?) -> Unit,
 ) {
-    val c = rememberCompanions(model, chatId)
     val sheet = rememberModalBottomSheetState()
+    val scope = rememberCoroutineScope()
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
+        CompanionsContent(
+            model, chatId, title, initialSection,
+            dismissThen = { run ->
+                scope.launch { sheet.hide() }.invokeOnCompletion {
+                    onDismiss()
+                    run()
+                }
+            },
+            onOpenSubagent = onOpenSubagent,
+            onOpenSideChat = onOpenSideChat,
+            onOpenTerminal = onOpenTerminal,
+        )
+    }
+}
+
+/**
+ * The companions list itself: in the sheet on phones, in the inspector beside
+ * the session on large screens. `dismissThen` puts the sheet away (if any)
+ * before opening what was picked.
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun CompanionsContent(
+    model: AppModel,
+    chatId: String,
+    title: String,
+    initialSection: CompanionSection?,
+    dismissThen: (() -> Unit) -> Unit,
+    onOpenSubagent: (SubagentRow) -> Unit,
+    onOpenSideChat: (String) -> Unit,
+    onOpenTerminal: (TerminalTab?) -> Unit,
+    modifier: Modifier = Modifier,
+    /** Shown in place of the big title (the inspector's own header). */
+    showTitle: Boolean = true,
+) {
+    val c = rememberCompanions(model, chatId)
     val scope = rememberCoroutineScope()
     val view = LocalView.current
     var forking by remember { mutableStateOf(false) }
@@ -192,12 +229,6 @@ fun CompanionsSheet(
         while (true) {
             delay(1000)
             now = System.currentTimeMillis()
-        }
-    }
-    fun dismissThen(run: () -> Unit) {
-        scope.launch { sheet.hide() }.invokeOnCompletion {
-            onDismiss()
-            run()
         }
     }
     fun newSideChat() {
@@ -228,9 +259,10 @@ fun CompanionsSheet(
     LaunchedEffect(initialSection) {
         val section = initialSection ?: return@LaunchedEffect
         // Items: title, [agents header + rows], side chats header + rows (or empty text + 2 actions), terminals…
-        val sides = 1 + if (agents.isNotEmpty()) agents.size + 1 else 0
+        val first = if (showTitle) 1 else 0
+        val sides = first + if (agents.isNotEmpty()) agents.size + 1 else 0
         val index = when (section) {
-            CompanionSection.Agents -> 1
+            CompanionSection.Agents -> first
             CompanionSection.SideChats -> sides
             CompanionSection.Terminals -> sides + 1 + if (c.sideChats.isEmpty()) 3 else c.sideChats.size
         }
@@ -238,9 +270,9 @@ fun CompanionsSheet(
         list.animateScrollToItem(index.coerceAtLeast(0))
     }
 
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
-        LazyColumn(state = list, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp), modifier = Modifier.fillMaxWidth()) {
-            item("title") {
+    run {
+        LazyColumn(state = list, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp), modifier = modifier.fillMaxWidth()) {
+            if (showTitle) item("title") {
                 Column(Modifier.padding(start = 8.dp, bottom = 4.dp)) {
                     Text(title, style = MaterialTheme.typography.headlineSmallEmphasized, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     val running = c.runningAgents

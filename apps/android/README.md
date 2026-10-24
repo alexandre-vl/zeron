@@ -43,11 +43,15 @@ transcript/  TranscriptState (layout engine + viewport: anchoring, follow the
 terminal/    TerminalView (a shell on the chat's host: paints the Rust
              emulator's frames, IME and hardware keys, scrollback fling,
              pinch to resize, selection), TerminalGlyphs (box drawing, blocks)
-ui/          Sign-in, sessions (Material 3 Expressive floating toolbar with
-             the New session FAB), session + composer, companions (subagents,
-             side chats, terminals: chips above the composer and a sheet),
-             subagent transcripts, terminal + key bar, new session, search,
-             settings
+ui/          Sign-in and the welcome pages, sessions (a Material 3 bottom
+             app bar with the New session FAB), session + composer,
+             companions (subagents, side chats, terminals: chips above the
+             composer and a sheet), subagent transcripts, terminal + key bar,
+             new session (Cloud too), search, settings, and Cloud: Providers,
+             an agent's accounts, Cloud, Billing, GitHub, Cloud projects.
+             TabletShell: large screens (≥ 700dp wide) put the sessions
+             sidebar beside the open session and its companions in an
+             inspector column (iPad's split); Settings is a dialog there.
 ```
 
 The core links C++ (`libc++_shared.so` ships beside it: `build-core.sh` passes
@@ -68,6 +72,8 @@ adb shell am start -n sh.zeron.android/.MainActivity \
 | `--ez fast true` / `--ez longreply true` | Demo stream speed / reply length |
 | `--ez big true` / `--ez huge true` | Demo transcripts with 120 / 600 turns |
 | `--es route chat:<id>` / `new` / `search` / `settings` (`more`) / `archived` | Open a screen at launch (with nobody signed in, on the demo) |
+| `--es route cloud` / `cloud:billing` / `cloud:repos` / `billing` / `providers[:cloud\|:<device id>]` / `accounts:cloud:<harness>` / `accounts:device:<id>:<harness>` / `new:cloud` / `welcome[:<step>]` | Cloud pages, a new session set to Cloud, the welcome pages |
+| `--ez cloud true` | Offer Cloud in the demo (its pages read the demo's Cloud) |
 | `--es companion companions` / `terminal` / `side-chat:<id>` / `subagent:<tool id>` | With `route chat:<id>`, open the companions sheet, a terminal, a side chat or a subagent over it |
 | `--ez terminal-demo true` | The opened terminal types a short script (screenshots) |
 | `--ez signedout true` | Clear stored credentials |

@@ -33,6 +33,7 @@ import androidx.compose.material3.ToggleButton
 import androidx.compose.material3.ToggleButtonDefaults
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -53,7 +54,15 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun SettingsScreen(model: AppModel, onArchived: () -> Unit, onOpenVoiceSettings: () -> Unit = {}, onBack: (() -> Unit)? = null) {
+fun SettingsScreen(
+    model: AppModel,
+    onArchived: () -> Unit,
+    onOpenVoiceSettings: () -> Unit = {},
+    onBack: (() -> Unit)? = null,
+    onOpenProviders: () -> Unit = {},
+    onOpenCloud: () -> Unit = {},
+    onOpenBilling: () -> Unit = {},
+) {
     val appearance by model.appearance.collectAsState()
     val groupByProject by model.groupByProject.collectAsState()
     var confirmSignOut by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
@@ -93,6 +102,24 @@ fun SettingsScreen(model: AppModel, onArchived: () -> Unit, onOpenVoiceSettings:
                         Text(model.accountName, style = MaterialTheme.typography.titleLargeEmphasized, color = MaterialTheme.colorScheme.onPrimaryContainer)
                         Text(model.accountDetail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f))
                     }
+                }
+            }
+        }
+        // Agents and where they run, as the desktop groups them: Providers,
+        // then Cloud and Billing when this account is offered Cloud.
+        section("Agents")
+        item {
+            val cloud = model.cloud
+            LaunchedEffect(Unit) { cloud.refresh() }
+            val offered = model.cloudOffered
+            val count = if (offered) 3 else 1
+            Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)) {
+                CloudRow(0, count, "Providers", "Agents and their accounts on each device", leading = { IconTile(ZIcons.Bot) }, onClick = onOpenProviders)
+                if (offered) {
+                    CloudRow(1, count, "Cloud", cloud.problem?.title ?: cloud.githubAccount?.let { "GitHub @$it" } ?: "Connect GitHub", leading = { IconTile(ZIcons.Cloud) }, onClick = onOpenCloud)
+                    val credits = cloud.credits?.let { "${sh.zeron.android.core.CloudStore.credits(it)} credits" }
+                    val plan = cloud.billing?.plan?.let { "${it.name} plan" }
+                    CloudRow(2, count, "Billing", listOfNotNull(plan, credits).joinToString(" · ").ifEmpty { "Plans and credits" }, leading = { IconTile(ZIcons.Wallet) }, onClick = onOpenBilling)
                 }
             }
         }
