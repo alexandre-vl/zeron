@@ -227,6 +227,10 @@ class TranscriptState {
         return out
     }
 
+    /** Where this transcript's visuals load their scripts (the chat's host) and the frames' pixel density. */
+    fun setVisualSource(client: uniffi.zeron_core.CoreClient, deviceId: String, pixelScale: Float) =
+        engine.setVisualSource(client, deviceId, pixelScale)
+
     fun close() {
         closed = true
         engine.shutdown()

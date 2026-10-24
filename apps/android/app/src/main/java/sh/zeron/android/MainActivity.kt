@@ -34,6 +34,9 @@ class MainActivity : ComponentActivity() {
                 noProjects = extras?.getBoolean("noprojects") == true,
                 signedOut = extras?.getBoolean("signedout") == true,
                 route = extras?.getString("route"),
+                companion = extras?.getString("companion"),
+                terminalDemo = extras?.getBoolean("terminal-demo") == true,
+                cloud = extras?.getBoolean("cloud") == true,
                 wallpaper = extras?.getString("wallpaper"),
                 wallpaperEffect = extras?.getString("wallpaper-effect"),
                 voicePreview = extras?.getBoolean("voice-preview") == true,
@@ -92,6 +95,12 @@ class MainActivity : ComponentActivity() {
             return
         }
         val data = intent?.data ?: return
-        if (data.scheme == "zeron") model.handleCallback(data.toString())
+        if (data.scheme != "zeron") return
+        if (data.host == "callback") model.handleCallback(data.toString()) else model.browser.links.tryEmit(data)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        model.browser.resumes.tryEmit(Unit)
     }
 }

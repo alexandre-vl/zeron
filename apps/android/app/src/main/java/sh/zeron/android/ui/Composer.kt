@@ -118,6 +118,8 @@ fun Composer(
     row: SessionRow?,
     transcript: TranscriptState,
     draft: ComposerModel,
+    /** Asked before a new message goes out; false keeps it (a Cloud chat out of credits). */
+    beforeSend: () -> Boolean = { true },
 ) {
     val scope = rememberCoroutineScope()
     val focus = remember { FocusRequester() }
@@ -202,6 +204,7 @@ fun Composer(
             restoreStash()
             return
         }
+        if (!beforeSend()) return
         val body = draft.encoded()
         try {
             val queued = running && delivery == Delivery.Queue

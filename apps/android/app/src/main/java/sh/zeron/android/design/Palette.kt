@@ -58,6 +58,8 @@ class TranscriptPalette(dark: Boolean, scheme: ColorScheme) {
                 ColorRole.SYNTAX_ATTRIBUTE -> c(0xB91C1C, 0xF87171)
                 ColorRole.SYNTAX_ESCAPE -> c(0x0E7490, 0x22D3EE)
                 ColorRole.TEXT_FAINT -> c(0x797981, 0x85858A)
+                ColorRole.DANGER_WASH -> if (dark) Color(0xFFF87171).copy(alpha = 0.12f).toArgb() else Color(0xFFDC2626).copy(alpha = 0.08f).toArgb()
+                ColorRole.DANGER_SOFT -> c(0xB91C1C, 0xFCA5A5)
                 ColorRole.TEXT_SOFT -> c(0x303035, 0xE8E8EA, 0.85f)
                 ColorRole.TOOL_RAIL -> w(0.162f, 0.12f)
                 ColorRole.TOOL_BADGE -> w(0.06f, 0.06f)

@@ -76,6 +76,10 @@ class TranscriptActions(
     val showText: (title: String, text: String, mono: Boolean) -> Unit,
     /** Open an attachment full size (a tapped image, or an image chip's upload). */
     val openImage: (String) -> Unit = {},
+    /** A subagent card was tapped: its transcript doc, title, and whether it still runs. */
+    val openSubagent: (docId: String, title: String, running: Boolean) -> Unit = { _, _, _ -> },
+    /** An in-transcript button (`sign-in` on an error card). */
+    val act: (String) -> Unit = {},
 )
 
 private const val OVERSCAN = 700f

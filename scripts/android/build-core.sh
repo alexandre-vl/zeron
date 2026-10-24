@@ -27,7 +27,9 @@ echo "kotlin bindings: $OUT/kotlin"
 if command -v cargo-ndk >/dev/null && [[ -n "${ANDROID_NDK_HOME:-}" ]]; then
   ABIS=()
   for abi in ${ZERON_ANDROID_ABIS:-arm64-v8a x86_64}; do ABIS+=(-t "$abi"); done
-  cargo ndk "${ABIS[@]}" -o "$OUT/jniLibs" \
+  # The core links C++ (the terminal emulator and GPU paths): ship the NDK's
+  # libc++_shared.so beside it.
+  cargo ndk "${ABIS[@]}" --link-libcxx-shared -o "$OUT/jniLibs" \
     build --locked -p zeron-mobile --lib --profile mobile
   echo "jniLibs: $OUT/jniLibs"
 else
