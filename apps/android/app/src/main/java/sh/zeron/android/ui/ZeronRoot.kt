@@ -1,60 +1,53 @@
 package sh.zeron.android.ui
 
+import android.net.Uri
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ChatBubble
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.outlined.ChatBubbleOutline
-import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.ShortNavigationBar
-import androidx.compose.material3.ShortNavigationBarItem
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.runtime.remember
-import sh.zeron.android.design.ZIcons
-import androidx.navigation.NavHostController
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
-import androidx.navigation.compose.rememberNavController
-import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FloatingToolbarDefaults
+import androidx.compose.material3.HorizontalFloatingToolbar
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
-import kotlinx.coroutines.launch
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TooltipAnchorPosition
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.rememberTooltipState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
@@ -63,7 +56,21 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.unit.dp
+import androidx.navigation.NavHostController
+import androidx.navigation.NavType
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
+import kotlinx.coroutines.launch
 import sh.zeron.android.core.AppModel
+import sh.zeron.android.design.ZIcon
+import sh.zeron.android.design.ZIcons
 import sh.zeron.android.design.ZeronTheme
 
 @Composable
@@ -88,10 +95,16 @@ object Routes {
     const val CHAT = "chat/{id}"
     const val NEW = "new"
     const val SEARCH = "search"
+    const val SETTINGS = "settings"
     const val ARCHIVED = "archived"
     const val VOICE = "voice"
     const val VOICE_SETTINGS = "voice-settings"
+    const val TERMINAL = "terminal/{chat}?id={id}"
+    const val SUBAGENT = "subagent/{parent}/{doc}?title={title}&running={running}"
     fun chat(id: String) = "chat/$id"
+    fun terminal(chat: String, id: String?) = "terminal/${Uri.encode(chat)}" + (id?.let { "?id=${Uri.encode(it)}" } ?: "")
+    fun subagent(parent: String, doc: String, title: String, running: Boolean) =
+        "subagent/${Uri.encode(parent)}/${Uri.encode(doc)}?title=${Uri.encode(title)}&running=$running"
 }
 
 @Composable
@@ -116,6 +129,7 @@ private fun MainNav(model: AppModel) {
             null -> Unit
             "new" -> nav.navigate(Routes.NEW)
             "search" -> nav.navigate(Routes.SEARCH)
+            "settings", "more" -> nav.navigate(Routes.SETTINGS)
             "archived" -> nav.navigate(Routes.ARCHIVED)
             else -> if (route.startsWith("chat:")) nav.navigate(Routes.chat(route.removePrefix("chat:")))
         }
@@ -126,6 +140,26 @@ private fun MainNav(model: AppModel) {
             if (nav.currentDestination?.route != Routes.VOICE) nav.navigate(Routes.VOICE) { launchSingleTop = true }
         }
     }
+    // A debug `companion` extra opens over the launch route's chat, once.
+    var companionPending by rememberSaveable { mutableStateOf(model.launch.companion) }
+
+    /** A session page with its companions wired to the nav stack. */
+    @Composable
+    fun Session(id: String, onBack: () -> Unit) {
+        val launchChat = model.launch.route?.removePrefix("chat:")
+        SessionScreen(
+            model,
+            id,
+            onBack = onBack,
+            onOpenVoice = { nav.navigate(Routes.VOICE) { launchSingleTop = true } },
+            onVoiceSettings = { nav.navigate(Routes.VOICE_SETTINGS) },
+            onOpenSideChat = { nav.navigate(Routes.chat(it)) },
+            onOpenTerminal = { chat, terminal -> nav.navigate(Routes.terminal(chat, terminal)) },
+            onOpenSubagent = { parent, doc, title, running -> nav.navigate(Routes.subagent(parent, doc, title, running)) },
+            openCompanion = companionPending?.takeIf { id == launchChat }?.also { companionPending = null },
+        )
+    }
+
     Box(
         Modifier.fillMaxSize().onPreviewKeyEvent { e ->
             // Hardware keyboards: Ctrl+N new session, Ctrl+Shift+F search (iPad ⌘N / ⌘⇧F).
@@ -148,18 +182,10 @@ private fun MainNav(model: AppModel) {
                     Box(Modifier.weight(1f).fillMaxHeight()) {
                         val id = selected
                         if (id != null) {
-                            key(id) {
-                                SessionScreen(
-                                    model,
-                                    id,
-                                    onBack = { selected = null },
-                                    onOpenVoice = { nav.navigate(Routes.VOICE) { launchSingleTop = true } },
-                                    onVoiceSettings = { nav.navigate(Routes.VOICE_SETTINGS) },
-                                )
-                            }
+                            key(id) { Session(id, onBack = { selected = null }) }
                         } else {
                             Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                                sh.zeron.android.design.ZIcon(ZIcons.Chat, null, Modifier.size(40.dp), tint = MaterialTheme.colorScheme.outline)
+                                ZIcon(ZIcons.Chat, null, Modifier.size(40.dp), tint = MaterialTheme.colorScheme.outline)
                                 androidx.compose.foundation.layout.Spacer(Modifier.size(12.dp))
                                 Text("Pick a session, or start a new one", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
@@ -171,14 +197,51 @@ private fun MainNav(model: AppModel) {
         composable(Routes.ARCHIVED) {
             ArchivedScreen(model, onBack = { nav.popBackStack() }, onOpen = { nav.navigate(Routes.chat(it)) })
         }
+        composable(Routes.SETTINGS) {
+            Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+                SettingsScreen(
+                    model,
+                    onArchived = { nav.navigate(Routes.ARCHIVED) },
+                    onOpenVoiceSettings = { nav.navigate(Routes.VOICE_SETTINGS) },
+                    onBack = { nav.popBackStack() },
+                )
+            }
+        }
         composable(Routes.CHAT) { entry ->
             val id = entry.arguments?.getString("id") ?: return@composable
-            SessionScreen(
+            Session(id, onBack = { nav.popBackStack() })
+        }
+        composable(
+            Routes.TERMINAL,
+            arguments = listOf(navArgument("chat") { type = NavType.StringType }, navArgument("id") { type = NavType.StringType; nullable = true }),
+        ) { entry ->
+            val chat = entry.arguments?.getString("chat") ?: return@composable
+            TerminalScreen(
                 model,
-                id,
+                chat,
+                terminalId = entry.arguments?.getString("id"),
                 onBack = { nav.popBackStack() },
-                onOpenVoice = { nav.navigate(Routes.VOICE) { launchSingleTop = true } },
-                onVoiceSettings = { nav.navigate(Routes.VOICE_SETTINGS) },
+                script = if (model.launch.terminalDemo) listOf("git log --oneline -5", "cargo test -p zeron-veil") else emptyList(),
+            )
+        }
+        composable(
+            Routes.SUBAGENT,
+            arguments = listOf(
+                navArgument("parent") { type = NavType.StringType },
+                navArgument("doc") { type = NavType.StringType },
+                navArgument("title") { type = NavType.StringType; defaultValue = "Subagent" },
+                navArgument("running") { type = NavType.BoolType; defaultValue = false },
+            ),
+        ) { entry ->
+            val args = entry.arguments ?: return@composable
+            SubagentScreen(
+                model,
+                parentId = args.getString("parent") ?: return@composable,
+                docId = args.getString("doc") ?: return@composable,
+                title = args.getString("title") ?: "Subagent",
+                running = args.getBoolean("running"),
+                onBack = { nav.popBackStack() },
+                onOpenSubagent = { parent, doc, title, running -> nav.navigate(Routes.subagent(parent, doc, title, running)) },
             )
         }
         composable(Routes.VOICE) {
@@ -229,55 +292,92 @@ private fun androidx.compose.foundation.layout.BoxScope.Toasts(model: AppModel, 
     }
     val entry by nav.currentBackStackEntryAsState()
     val inset = when (entry?.destination?.route) {
-        Routes.HOME -> 176.dp
+        Routes.HOME -> 96.dp
         Routes.CHAT, Routes.NEW -> 96.dp
+        Routes.TERMINAL, Routes.SUBAGENT -> 72.dp
         else -> 16.dp
     }
     SnackbarHost(host, Modifier.align(Alignment.BottomCenter).imePadding().navigationBarsPadding().padding(bottom = inset))
 }
 
-private enum class Tab { Sessions, Settings }
-
+/**
+ * The front page: the Sessions list under a Material 3 Expressive floating
+ * toolbar — Settings, Search and voice, with New session as its FAB (iOS's
+ * bottom bar: Settings · Search · voice · New session). Scrolling down the
+ * list tucks the toolbar away to just the FAB; scrolling up brings it back.
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun Home(model: AppModel, nav: NavHostController, open: (String) -> Unit, selected: String? = null) {
-    var tab by rememberSaveable { mutableStateOf(if (model.launch.route == "settings" || model.launch.route == "more") Tab.Settings else Tab.Sessions) }
-    val workspace by model.workspace.collectAsState()
-    val summary = remember(workspace) { workspace?.let { liveSummary(it) } }
-    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        when (tab) {
-            Tab.Sessions -> SessionsScreen(model, onOpen = open, onArchived = { nav.navigate(Routes.ARCHIVED) }, selected = selected)
-            Tab.Settings -> SettingsScreen(model, onArchived = { nav.navigate(Routes.ARCHIVED) }, onOpenVoiceSettings = { nav.navigate(Routes.VOICE_SETTINGS) })
+    var expanded by rememberSaveable { mutableStateOf(true) }
+    val collapse = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (available.y < -8f) expanded = false else if (available.y > 8f) expanded = true
+                return Offset.Zero
+            }
         }
-        // Floating chrome over a soft scrim: new session, then the nav capsule.
-        Column(
+    }
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Box(Modifier.fillMaxSize().nestedScroll(collapse)) {
+            SessionsScreen(model, onOpen = open, onArchived = { nav.navigate(Routes.ARCHIVED) }, selected = selected)
+        }
+        // A soft scrim so rows fade out under the toolbar.
+        Box(
             Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .background(Brush.verticalGradient(0f to Color.Transparent, 0.25f to MaterialTheme.colorScheme.background.copy(alpha = 0.94f), 0.6f to MaterialTheme.colorScheme.background))
-                .navigationBarsPadding()
-                .padding(top = 28.dp, bottom = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            if (tab == Tab.Sessions) {
-                val voiceLive = model.voice.snapshot.collectAsState().value.live
-                NewSessionBar(summary, onClick = { nav.navigate(Routes.NEW) }, voiceLive = voiceLive) {
-                    sh.zeron.android.voice.VoiceNewSessionAccessory(
-                        model.voice,
-                        onOpenStage = { nav.navigate(Routes.VOICE) { launchSingleTop = true } },
-                        onOpenSettings = { nav.navigate(Routes.VOICE_SETTINGS) },
-                        modifier = if (voiceLive) Modifier.weight(1f) else Modifier,
-                    )
+                .height(120.dp)
+                .background(Brush.verticalGradient(0f to Color.Transparent, 0.7f to MaterialTheme.colorScheme.background.copy(alpha = 0.92f), 1f to MaterialTheme.colorScheme.background)),
+        )
+        val voice = sh.zeron.android.voice.rememberVoiceVisible(model.voice)
+        HorizontalFloatingToolbar(
+            expanded = expanded,
+            floatingActionButton = {
+                Tip("New session") {
+                    FloatingToolbarDefaults.VibrantFloatingActionButton(
+                        onClick = { nav.navigate(Routes.NEW) },
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                    ) {
+                        ZIcon(ZIcons.NewSession, "New session", Modifier.size(24.dp))
+                    }
                 }
+            },
+            colors = FloatingToolbarDefaults.vibrantFloatingToolbarColors(),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 12.dp),
+        ) {
+            Tip("Settings") {
+                IconButton(onClick = { nav.navigate(Routes.SETTINGS) }) { ZIcon(ZIcons.Settings, "Settings", Modifier.size(24.dp)) }
             }
-            FloatingNavBar(
-                listOf(
-                    NavItem("Sessions", ZIcons.TabSessions, tab == Tab.Sessions) { tab = Tab.Sessions },
-                    NavItem("Settings", ZIcons.TabSettings, tab == Tab.Settings) { tab = Tab.Settings },
-                ),
-                trailing = {
-                    TonalCircleButton(ZIcons.Search, "Search", onClick = { nav.navigate(Routes.SEARCH) }, size = 72.dp)
-                },
-            )
+            Tip("Search") {
+                IconButton(onClick = { nav.navigate(Routes.SEARCH) }) { ZIcon(ZIcons.Search, "Search", Modifier.size(24.dp)) }
+            }
+            if (voice) {
+                // Tap calls (or opens the live call); hold picks the host and style.
+                sh.zeron.android.voice.VoiceHeaderButton(
+                    model.voice,
+                    onOpenStage = { nav.navigate(Routes.VOICE) { launchSingleTop = true } },
+                    onOpenSettings = { nav.navigate(Routes.VOICE_SETTINGS) },
+                    size = 40.dp,
+                    container = Color.Transparent,
+                )
+            }
         }
     }
+}
+
+/** A long-press label for an icon-only control. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun Tip(text: String, content: @Composable () -> Unit) {
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+        tooltip = { PlainTooltip { Text(text) } },
+        state = rememberTooltipState(),
+        content = content,
+    )
 }

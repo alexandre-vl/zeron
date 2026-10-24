@@ -40,9 +40,18 @@ transcript/  TranscriptState (layout engine + viewport: anchoring, follow the
              tail), Transcript (virtualized rows over LayoutFrame), RowModel
              (canvas painter for Rust display lists, streaming veil, fades),
              Widgets (copy, disclosures, tool rail, shimmer, images…)
-ui/          Sign-in, sessions, session + composer, new session, search,
+terminal/    TerminalView (a shell on the chat's host: paints the Rust
+             emulator's frames, IME and hardware keys, scrollback fling,
+             pinch to resize, selection), TerminalGlyphs (box drawing, blocks)
+ui/          Sign-in, sessions (Material 3 Expressive floating toolbar with
+             the New session FAB), session + composer, companions (subagents,
+             side chats, terminals: chips above the composer and a sheet),
+             subagent transcripts, terminal + key bar, new session, search,
              settings
 ```
+
+The core links C++ (`libc++_shared.so` ships beside it: `build-core.sh` passes
+`--link-libcxx-shared` to cargo-ndk).
 
 ## Launch extras
 
@@ -59,6 +68,8 @@ adb shell am start -n sh.zeron.android/.MainActivity \
 | `--ez fast true` / `--ez longreply true` | Demo stream speed / reply length |
 | `--ez big true` / `--ez huge true` | Demo transcripts with 120 / 600 turns |
 | `--es route chat:<id>` / `new` / `search` / `settings` (`more`) / `archived` | Open a screen at launch (with nobody signed in, on the demo) |
+| `--es companion companions` / `terminal` / `side-chat:<id>` / `subagent:<tool id>` | With `route chat:<id>`, open the companions sheet, a terminal, a side chat or a subagent over it |
+| `--ez terminal-demo true` | The opened terminal types a short script (screenshots) |
 | `--ez signedout true` | Clear stored credentials |
 | `--es wallpaper <path>` / `none` | Set (or clear) the wallpaper from a file the app can read, e.g. `adb push art.jpg /data/local/tmp/ && adb shell run-as sh.zeron.android cp /data/local/tmp/art.jpg files/` then `--es wallpaper /data/user/0/sh.zeron.android/files/art.jpg` |
 | `--es wallpaper-effect <none\|dither\|ascii\|halftone\|scanlines>` | Wallpaper effect |

@@ -53,7 +53,7 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun SettingsScreen(model: AppModel, onArchived: () -> Unit, onOpenVoiceSettings: () -> Unit = {}) {
+fun SettingsScreen(model: AppModel, onArchived: () -> Unit, onOpenVoiceSettings: () -> Unit = {}, onBack: (() -> Unit)? = null) {
     val appearance by model.appearance.collectAsState()
     val groupByProject by model.groupByProject.collectAsState()
     var confirmSignOut by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
@@ -64,8 +64,15 @@ fun SettingsScreen(model: AppModel, onArchived: () -> Unit, onOpenVoiceSettings:
     LazyColumn(
         Modifier.fillMaxSize(),
         state = list,
-        contentPadding = PaddingValues(top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 8.dp, bottom = 140.dp),
+        contentPadding = PaddingValues(top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 8.dp, bottom = 48.dp),
     ) {
+        if (onBack != null) {
+            item {
+                Box(Modifier.padding(start = 12.dp, top = 4.dp)) {
+                    TonalCircleButton(sh.zeron.android.design.ZIcons.Back, "Back", onClick = onBack, container = MaterialTheme.colorScheme.surfaceContainerHighest)
+                }
+            }
+        }
         item { ScreenHeader("Settings", null) }
         item {
             // Account: a tonal hero card with a shaped monogram.

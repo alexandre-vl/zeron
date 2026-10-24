@@ -32,6 +32,8 @@ class MainActivity : ComponentActivity() {
                 noProjects = extras?.getBoolean("noprojects") == true,
                 signedOut = extras?.getBoolean("signedout") == true,
                 route = extras?.getString("route"),
+                companion = extras?.getString("companion"),
+                terminalDemo = extras?.getBoolean("terminal-demo") == true,
                 wallpaper = extras?.getString("wallpaper"),
                 wallpaperEffect = extras?.getString("wallpaper-effect"),
                 voicePreview = extras?.getBoolean("voice-preview") == true,

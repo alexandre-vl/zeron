@@ -76,6 +76,19 @@ object ZIcons {
     val Worktree = R.drawable.zi_worktree
     val Restart = R.drawable.zi_restart
     val Command = R.drawable.zi_command
+    val Settings = R.drawable.zi_settings
+    val Terminal = R.drawable.zi_terminal
+    val Fork = R.drawable.zi_fork
+    val Bot = R.drawable.zi_bot
+    val SideChats = R.drawable.zi_chats
+    val Companions = R.drawable.zi_layers
+    val Keyboard = R.drawable.zi_keyboard
+    val KeyboardHide = R.drawable.zi_keyboard_hide
+    val Paste = R.drawable.zi_clipboard
+    val ArrowUp = R.drawable.zi_alt_arrow_up
+    val ArrowLeft = R.drawable.zi_alt_arrow_left
+    val ArrowRight = R.drawable.zi_alt_arrow_right
+    val Minus = R.drawable.zi_minus
 }
 
 @Composable

@@ -95,7 +95,18 @@ private data class TextSheet(val title: String, val text: String, val mono: Bool
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun SessionScreen(model: AppModel, chatId: String, onBack: () -> Unit, onOpenVoice: () -> Unit = {}, onVoiceSettings: () -> Unit = {}) {
+fun SessionScreen(
+    model: AppModel,
+    chatId: String,
+    onBack: () -> Unit,
+    onOpenVoice: () -> Unit = {},
+    onVoiceSettings: () -> Unit = {},
+    onOpenSideChat: (String) -> Unit = {},
+    onOpenTerminal: (chatId: String, terminalId: String?) -> Unit = { _, _ -> },
+    onOpenSubagent: (parentId: String, docId: String, title: String, running: Boolean) -> Unit = { _, _, _, _ -> },
+    /** Debug launch extra: open a companion once the session is up (`companions`, `terminal`, `side-chat:<id>`, `subagent:<tool id>`). */
+    openCompanion: String? = null,
+) {
     val client by model.client.collectAsState()
     val core = client ?: return
     val handle: SessionHandle = remember(chatId) { runCatching { core.openSession(chatId) }.getOrNull() } ?: run {
@@ -107,15 +118,26 @@ fun SessionScreen(model: AppModel, chatId: String, onBack: () -> Unit, onOpenVoi
         return
     }
     val transcript = remember(chatId) { TranscriptState() }
+    val density = LocalDensity.current.density
     DisposableEffect(chatId) {
         transcript.engine.attach(core, chatId)
+        // Agent visuals run their scripts from the chat's host.
+        model.row(chatId)?.deviceId?.let { transcript.setVisualSource(core, it, maxOf(2f, density)) }
         handle.setViewAttached(true)
         model.markSeen(chatId)
+        model.openChats.add(chatId)
         onDispose {
+            model.openChats.remove(chatId)
             handle.setViewAttached(false)
             transcript.close()
             // What arrived while it was open has been seen too.
             model.markSeen(chatId)
+            // A side chat started here and left without a word: gone.
+            val unused = runCatching { handle.transcriptStatus().let { it.entryCount == 0u && it.pendingCount == 0u } && handle.composer().queue.isEmpty() }.getOrDefault(false)
+            if (model.isFreshSideChat(chatId) && unused && model.drafts.load(chatId).isEmpty() && model.row(chatId)?.preview == null) {
+                model.forgetFreshSideChat(chatId)
+                model.delete(chatId)
+            }
         }
     }
 
@@ -156,13 +178,66 @@ fun SessionScreen(model: AppModel, chatId: String, onBack: () -> Unit, onOpenVoi
             loadImage = ::load,
             showText = { title, text, mono -> sheet = TextSheet(title, text, mono) },
             openImage = open,
+            openSubagent = { doc, title, running -> onOpenSubagent(chatId, doc, title, running) },
         )
     }
     // The composer's draft outlives the panel that replaces it while the agent asks.
     val draft = remember(chatId) { ComposerModel(model.drafts.load(chatId)) }
+    // Text handed to this chat (a terminal's output) lands after what's typed.
+    DisposableEffect(chatId) {
+        model.composerSinks[chatId] = { text ->
+            val current = draft.text
+            draft.setText(if (current.isEmpty()) text else current + (if (current.endsWith("\n")) "" else "\n") + text)
+            model.drafts.save(chatId, draft.text)
+        }
+        onDispose { model.composerSinks.remove(chatId) }
+    }
+
+    // Companions: subagents, side chats (a side chat's siblings live with its parent), terminals.
+    val parentId = row?.parentChatId
+    val companions = rememberCompanions(model, chatId, includeSideChats = parentId == null)
+    var companionsSheet by remember { mutableStateOf<CompanionSection?>(null) }
+    var showCompanions by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    val view = androidx.compose.ui.platform.LocalView.current
+    fun newSideChat() {
+        val id = model.createSideChat(parentId ?: chatId) ?: return model.toast("Couldn't start a side chat")
+        onOpenSideChat(id)
+    }
+    fun fork() {
+        model.toast("Forking…")
+        scope.launch {
+            try {
+                val id = model.forkSideChat(chatId)
+                view.performHapticFeedback(android.view.HapticFeedbackConstants.CONFIRM)
+                onOpenSideChat(id)
+            } catch (e: Exception) {
+                model.toast(forkError(e))
+            }
+        }
+    }
+    fun openTerminal() = onOpenTerminal(chatId, model.terminals.tabs(chatId).firstOrNull { it.isLive }?.ref?.id)
+    LaunchedEffect(chatId) {
+        val which = openCompanion ?: return@LaunchedEffect
+        delay(800)
+        when {
+            which == "companions" -> showCompanions = true
+            which == "terminal" -> onOpenTerminal(chatId, null)
+            which.startsWith("side-chat:") -> onOpenSideChat(which.removePrefix("side-chat:"))
+            which.startsWith("subagent:") -> {
+                val tool = which.removePrefix("subagent:")
+                model.sessionSubagents(chatId).firstOrNull { it.id == tool || it.docId?.endsWith(tool) == true }?.let { a ->
+                    a.docId?.let { onOpenSubagent(chatId, it, a.title, a.state == uniffi.zeron_core.SubagentState.RUNNING) }
+                }
+            }
+        }
+    }
 
     val project = row?.project?.name ?: "No project"
-    val subtitle = composer.host.name?.let { "$project @ $it" } ?: project
+    val parentTitle = remember(workspace, parentId) { parentId?.let { model.row(it)?.title } }
+    // A side chat heads itself as one, under its parent's title.
+    val headerTitle = if (parentId != null) "Side chat" else composer.title
+    val subtitle = parentTitle ?: composer.host.name?.let { "$project @ $it" } ?: project
     var overflow by remember { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
 
@@ -186,7 +261,7 @@ fun SessionScreen(model: AppModel, chatId: String, onBack: () -> Unit, onOpenVoi
             ) {
                 TonalCircleButton(ZIcons.Back, "Back", onClick = onBack, container = MaterialTheme.colorScheme.surfaceContainerHighest)
                 Column(Modifier.weight(1f).padding(horizontal = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(composer.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMediumEmphasized)
+                    Text(headerTitle, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMediumEmphasized)
                     Text(subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 // The session has its own composer; the call stays a tap away up here.
@@ -194,21 +269,41 @@ fun SessionScreen(model: AppModel, chatId: String, onBack: () -> Unit, onOpenVoi
                     sh.zeron.android.voice.VoiceHeaderButton(model.voice, onOpenStage = onOpenVoice, onOpenSettings = onVoiceSettings)
                     androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp))
                 }
+                // Agents, side chats and terminals; a badge while agents work.
+                androidx.compose.material3.BadgedBox(
+                    badge = {
+                        if (companions.runningAgents > 0) {
+                            androidx.compose.material3.Badge(containerColor = MaterialTheme.colorScheme.primary) { Text("${companions.runningAgents}") }
+                        }
+                    },
+                ) {
+                    TonalCircleButton(ZIcons.Companions, "Agents, side chats and terminals", onClick = { showCompanions = true }, container = MaterialTheme.colorScheme.surfaceContainerHighest)
+                }
+                androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp))
                 Box {
                     TonalCircleButton(ZIcons.More, "More", onClick = { overflow = true }, container = MaterialTheme.colorScheme.surfaceContainerHighest)
-                    ActionMenu(
+                    GroupedActionMenu(
                         overflow,
                         { overflow = false },
-                        listOfNotNull(
-                            MenuAction("Copy transcript", ZIcons.Copy) { transcript.frame?.let { clipboard.setText(AnnotatedString(it.plainText())) } },
-                            row?.let { r -> MenuAction(if (r.pinned) "Unpin" else "Pin", ZIcons.Pin) { model.setPinned(chatId, !r.pinned) } },
-                            row?.let {
-                                MenuAction("Archive", ZIcons.Archive) {
-                                    model.archive(chatId)
-                                    onBack()
-                                }
-                            },
+                        listOf(
+                            listOf(
+                                MenuAction("New side chat", ZIcons.SideChats) { newSideChat() },
+                                MenuAction("Fork into side chat", ZIcons.Fork) { fork() },
+                                MenuAction("Terminal", ZIcons.Terminal) { openTerminal() },
+                            ),
+                            listOfNotNull(
+                                row?.let { r -> MenuAction(if (r.pinned) "Unpin" else "Pin", ZIcons.Pin) { model.setPinned(chatId, !r.pinned) } },
+                                MenuAction("Copy transcript", ZIcons.Copy) { transcript.frame?.let { clipboard.setText(AnnotatedString(it.plainText())) } },
+                                row?.let {
+                                    MenuAction("Archive", ZIcons.Archive) {
+                                        model.archive(chatId)
+                                        onBack()
+                                    }
+                                },
+                            ),
+                            listOfNotNull(row?.let { MenuAction("Delete", ZIcons.Delete, destructive = true) { confirmDelete = true } }),
                         ),
+                        header = listOf(composer.title, subtitle).filter { it.isNotEmpty() }.joinToString("\n"),
                     )
                 }
             }
@@ -231,7 +326,10 @@ fun SessionScreen(model: AppModel, chatId: String, onBack: () -> Unit, onOpenVoi
             }
         }
         Column(Modifier.fillMaxWidth().imePadding().navigationBarsPadding()) {
-            Banner(composer, connectivity?.state, onRetry = { runCatching { handle.retryDelivery() } })
+            Row(Modifier.fillMaxWidth().padding(end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) { Banner(composer, connectivity?.state, onRetry = { runCatching { handle.retryDelivery() } }) }
+                CompanionStrip(companions, onTap = { companionsSheet = it; showCompanions = true }, modifier = if (companions.isEmpty) Modifier else Modifier.padding(vertical = 6.dp))
+            }
             val input = composer.openInput
             // The panel replaces the composer while the agent asks.
             if (input != null) {
@@ -243,6 +341,46 @@ fun SessionScreen(model: AppModel, chatId: String, onBack: () -> Unit, onOpenVoi
     }
 
     viewing?.let { ImageViewer(it) { viewing = null } }
+
+    if (showCompanions) {
+        CompanionsSheet(
+            model,
+            chatId,
+            title = if (parentId != null) "Side chat" else composer.title,
+            initialSection = companionsSheet,
+            onDismiss = {
+                showCompanions = false
+                companionsSheet = null
+            },
+            onOpenSubagent = { a -> a.docId?.let { onOpenSubagent(chatId, it, a.title, a.state == uniffi.zeron_core.SubagentState.RUNNING) } },
+            onOpenSideChat = onOpenSideChat,
+            onOpenTerminal = { tab -> onOpenTerminal(chatId, tab?.ref?.id) },
+        )
+    }
+
+    if (confirmDelete) {
+        // Permanent, like the desktop's dialog; a Cloud session's machine goes with it.
+        val name = row?.takeIf { it.hasTitle }?.title ?: "New session"
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            icon = { ZIcon(ZIcons.Delete, null) },
+            title = { Text("Delete session?") },
+            text = {
+                Text(
+                    if (row?.isCloud == true) "\u201C$name\u201D and its Cloud machine will be permanently deleted, with anything not pushed from it. This can\u2019t be undone."
+                    else "\u201C$name\u201D will be permanently deleted. This can\u2019t be undone.",
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    confirmDelete = false
+                    model.delete(chatId)
+                    onBack()
+                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
+        )
+    }
 
     sheet?.let { s ->
         ModalBottomSheet(onDismissRequest = { sheet = null }) {

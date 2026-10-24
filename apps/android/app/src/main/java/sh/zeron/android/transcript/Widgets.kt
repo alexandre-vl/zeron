@@ -12,6 +12,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -137,7 +138,47 @@ private fun Widget(state: TranscriptState, model: RowModel, w: Widget, palette: 
             state.toggleDetail(key, kind.detail, kind.open)
         }
         WidgetKind.Shimmer -> Shimmer(state, model, w, palette)
+        is WidgetKind.Visual -> VisualWidget(state, model, kind.id, actions.openUrl)
+        is WidgetKind.Subagent -> SubagentCard(kind, palette) { doc ->
+            haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
+            actions.openSubagent(doc, kind.title, kind.running)
+        }
+        is WidgetKind.Action -> ActionButton(kind.label, palette) { actions.act(kind.action) }
     }
+}
+
+/** A subagent card's tap target: a wash over the painted card while pressed. */
+@Composable
+private fun SubagentCard(kind: WidgetKind.Subagent, palette: TranscriptPalette, onOpen: (String) -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val wash by androidx.compose.animation.core.animateFloatAsState(if (pressed) 1f else 0f, MaterialTheme.motionScheme.fastEffectsSpec(), label = "wash")
+    val doc = kind.docId
+    Box(
+        Modifier
+            .fillMaxSize()
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(palette[ColorRole.TEXT]).copy(alpha = 0.06f * wash))
+            .semantics {
+                contentDescription = "Subagent: ${kind.title}, " + if (kind.running) "working" else if (kind.failed) "failed" else "done"
+            }
+            .clickable(interactionSource = interaction, indication = null, enabled = doc != null) { doc?.let(onOpen) },
+    )
+}
+
+/** A button the app acts on (an error card's "Log in"). */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun ActionButton(label: String, palette: TranscriptPalette, onClick: () -> Unit) {
+    androidx.compose.material3.Button(
+        onClick = onClick,
+        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+            containerColor = Color(palette[ColorRole.DANGER]),
+            contentColor = MaterialTheme.colorScheme.background,
+        ),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp),
+        modifier = Modifier.fillMaxSize(),
+    ) { Text(label, style = MaterialTheme.typography.labelLargeEmphasized) }
 }
 
 @Composable

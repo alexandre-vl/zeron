@@ -166,27 +166,37 @@ class MenuAction(
 )
 
 /** An expressive action menu (one segmented group). */
+@Composable
+fun ActionMenu(expanded: Boolean, onDismiss: () -> Unit, actions: List<MenuAction>) =
+    GroupedActionMenu(expanded, onDismiss, listOf(actions))
+
+/** An expressive action menu in separate groups (iOS inline menus), optionally headed by a label. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun ActionMenu(expanded: Boolean, onDismiss: () -> Unit, actions: List<MenuAction>) {
+fun GroupedActionMenu(expanded: Boolean, onDismiss: () -> Unit, groups: List<List<MenuAction>>, header: String? = null) {
+    val shown = groups.filter { it.isNotEmpty() }
     DropdownMenuPopup(expanded = expanded, onDismissRequest = onDismiss) {
-        DropdownMenuGroup(shapes = MenuDefaults.groupShape(0, 1)) {
-            actions.forEachIndexed { i, a ->
-                val tint = if (a.destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
-                DropdownMenuItem(
-                    onClick = {
-                        onDismiss()
-                        a.onClick()
-                    },
-                    text = { Text(a.label, color = tint) },
-                    shape = MenuDefaults.itemShape(i, actions.size).shape,
-                    leadingIcon = { sh.zeron.android.design.ZIcon(a.icon, null, Modifier.size(20.dp), tint = tint) },
-                    trailingIcon = if (a.checked == true) {
-                        { sh.zeron.android.design.ZIcon(sh.zeron.android.design.ZIcons.Check, "On", Modifier.size(20.dp), tint = tint) }
-                    } else {
-                        null
-                    },
-                )
+        shown.forEachIndexed { g, actions ->
+            if (g > 0) androidx.compose.foundation.layout.Spacer(Modifier.size(MenuDefaults.GroupSpacing))
+            DropdownMenuGroup(shapes = MenuDefaults.groupShape(g, shown.size)) {
+                if (g == 0 && header != null) MenuDefaults.Label { Text(header, style = MaterialTheme.typography.labelMedium, maxLines = 2) }
+                actions.forEachIndexed { i, a ->
+                    val tint = if (a.destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                    DropdownMenuItem(
+                        onClick = {
+                            onDismiss()
+                            a.onClick()
+                        },
+                        text = { Text(a.label, color = tint) },
+                        shape = MenuDefaults.itemShape(i, actions.size).shape,
+                        leadingIcon = { sh.zeron.android.design.ZIcon(a.icon, null, Modifier.size(20.dp), tint = tint) },
+                        trailingIcon = if (a.checked == true) {
+                            { sh.zeron.android.design.ZIcon(sh.zeron.android.design.ZIcons.Check, "On", Modifier.size(20.dp), tint = tint) }
+                        } else {
+                            null
+                        },
+                    )
+                }
             }
         }
     }

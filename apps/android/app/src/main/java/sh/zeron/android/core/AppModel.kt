@@ -67,6 +67,10 @@ data class LaunchOptions(
     val noProjects: Boolean = false,
     val signedOut: Boolean = false,
     val route: String? = null,
+    /** `--es companion companions|terminal|side-chat:<id>|subagent:<tool id>`: open it over the routed chat (screenshots). */
+    val companion: String? = null,
+    /** `--ez terminal-demo true`: the opened terminal types a short script. */
+    val terminalDemo: Boolean = false,
     val wallpaper: String? = null,
     val wallpaperEffect: String? = null,
     /** `--ez voice-preview true`: the scripted call (debuggable builds). */
@@ -387,6 +391,7 @@ class AppModel(private val app: Application) {
         val wasDemo = isDemo
         endDeliveryHold()
         lastDeliveryActivity = 0L
+        terminals.signOut()
         _client.value?.shutdown()
         _client.value = null
         _workspace.value = null
@@ -439,6 +444,7 @@ class AppModel(private val app: Application) {
     fun refreshWorkspace() {
         val client = _client.value ?: return
         _workspace.value = client.workspace()
+        sweepFreshSideChats()
     }
 
     fun onForeground() {
@@ -543,6 +549,93 @@ class AppModel(private val app: Application) {
     fun deleteSection(id: String) = attempt("delete section") { _client.value?.deleteSection(id) }
 
     fun row(id: String): SessionRow? = _client.value?.sessionRow(id)
+
+    /** Delete for good (the desktop's "Delete session"). */
+    fun delete(id: String) = attempt("delete") {
+        _client.value?.deleteSession(id)
+        drafts.save(id, "")
+        refreshWorkspace()
+    }
+
+    /** A device's name ("MacBook Pro"), or a stand-in. */
+    fun deviceName(deviceId: String): String =
+        _workspace.value?.devices?.firstOrNull { it.id == deviceId }?.name ?: "its computer"
+
+    // ── companions (side chats, subagents, terminals) ──────────────────────
+
+    /** Every chat's terminals (shells on their hosts). */
+    val terminals = TerminalStore(app) { _client.value }
+
+    /** A session's side chats, newest first. */
+    fun sideChats(chatId: String): List<SessionRow> =
+        _client.value?.childSessions(chatId).orEmpty().filter { !it.archived }
+
+    /** The subagents a session's agent spawned (its open transcript). */
+    fun sessionSubagents(chatId: String): List<uniffi.zeron_core.SubagentRow> {
+        val client = _client.value ?: return emptyList()
+        if ("--sub--" in chatId) return emptyList()
+        val handle = client.session(chatId) ?: runCatching { client.openSession(chatId) }.getOrNull()
+        return handle?.subagents().orEmpty()
+    }
+
+    /**
+     * Side chats started here that nothing has been sent in yet: closed
+     * unused, they go (the desktop only writes one at its first send). Kept
+     * across launches, so one left open when the app was killed goes too.
+     */
+    private var freshSideChats: Set<String> = settings.getStringSet("freshSideChats", emptySet())!!.toSet()
+        set(value) {
+            field = value
+            settings.edit().putStringSet("freshSideChats", value).apply()
+        }
+
+    fun isFreshSideChat(id: String) = id in freshSideChats
+    fun forgetFreshSideChat(id: String) { freshSideChats = freshSideChats - id }
+
+    /** Chats with a session screen up (the sweep leaves those alone). */
+    val openChats = HashSet<String>()
+
+    /** Fresh side chats nobody has open: empty a minute on, they go; one that got a message is just a side chat now. */
+    private fun sweepFreshSideChats() {
+        if (freshSideChats.isEmpty()) return
+        val now = System.currentTimeMillis()
+        for (id in freshSideChats) {
+            val row = row(id) ?: continue
+            if (row.preview != null) {
+                forgetFreshSideChat(id)
+            } else if (id !in openChats && now - row.createdAtMs > 60_000) {
+                forgetFreshSideChat(id)
+                delete(id)
+            }
+        }
+    }
+
+    /** A fresh side chat under `parentId`; null when it couldn't be made. */
+    fun createSideChat(parentId: String): String? = try {
+        _client.value?.createSideChat(parentId)?.also {
+            freshSideChats = freshSideChats + it
+            refreshWorkspace()
+        }
+    } catch (e: Exception) {
+        Log.w("Zeron", "side chat failed", e)
+        null
+    }
+
+    /** Fork `sourceId` into a side chat (its host copies the conversation). */
+    suspend fun forkSideChat(sourceId: String): String {
+        val client = _client.value ?: throw uniffi.zeron_core.CoreException.Closed()
+        return client.forkSideChat(sourceId).also { refreshWorkspace() }
+    }
+
+    /** Open composers by chat: text handed to a chat (terminal output) lands in its draft. */
+    val composerSinks = HashMap<String, (String) -> Unit>()
+
+    /** Text into a chat's composer, after what's there (or its saved draft when it isn't open). */
+    fun appendToComposer(chatId: String, text: String) {
+        composerSinks[chatId]?.let { return it(text) }
+        val draft = drafts.load(chatId)
+        drafts.save(chatId, if (draft.isEmpty()) text else draft + "\n" + text)
+    }
 
     /** Create the chat and send its first message. */
     fun createSession(draft: NewSessionDraft, text: String, attachments: List<uniffi.zeron_core.OutgoingAttachment> = emptyList()): String? {
