@@ -2768,7 +2768,15 @@ impl RpcService for EngineRpc {
                     // sweep; the subagent's doc stays the source's.
                     for part in &mut entry.parts {
                         match part {
-                            zeron_doc::MessagePart::Input { resolved, .. } => *resolved = true,
+                            zeron_doc::MessagePart::Input {
+                                resolved, answers, ..
+                            } => {
+                                if !*resolved {
+                                    // Never answered in the source; closed here.
+                                    *answers = Some(Vec::new());
+                                }
+                                *resolved = true;
+                            }
                             zeron_doc::MessagePart::Tool {
                                 subagent_status, ..
                             } if *subagent_status == Some(zeron_doc::SubagentStatus::Running) => {
