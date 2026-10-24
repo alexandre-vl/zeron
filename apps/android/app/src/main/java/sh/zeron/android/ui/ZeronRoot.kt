@@ -19,8 +19,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.FloatingToolbarDefaults
-import androidx.compose.material3.HorizontalFloatingToolbar
+import androidx.compose.material3.BottomAppBar
+import androidx.compose.material3.BottomAppBarDefaults
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PlainTooltip
@@ -45,8 +46,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -56,8 +55,6 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
@@ -301,72 +298,53 @@ private fun androidx.compose.foundation.layout.BoxScope.Toasts(model: AppModel, 
 }
 
 /**
- * The front page: the Sessions list under a Material 3 Expressive floating
- * toolbar — Settings, Search and voice, with New session as its FAB (iOS's
- * bottom bar: Settings · Search · voice · New session). Scrolling down the
- * list tucks the toolbar away to just the FAB; scrolling up brings it back.
+ * The front page: the Sessions list over a Material 3 bottom app bar —
+ * Settings, Search and voice as its actions, New session as its FAB (iOS's
+ * bottom bar: Settings · Search · voice · New session). The bar slides away
+ * while the list scrolls down and comes back on the way up.
  */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun Home(model: AppModel, nav: NavHostController, open: (String) -> Unit, selected: String? = null) {
-    var expanded by rememberSaveable { mutableStateOf(true) }
-    val collapse = remember {
-        object : NestedScrollConnection {
-            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                if (available.y < -8f) expanded = false else if (available.y > 8f) expanded = true
-                return Offset.Zero
-            }
-        }
-    }
+    val bar = BottomAppBarDefaults.exitAlwaysScrollBehavior()
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        Box(Modifier.fillMaxSize().nestedScroll(collapse)) {
+        Box(Modifier.fillMaxSize().nestedScroll(bar.nestedScrollConnection)) {
             SessionsScreen(model, onOpen = open, onArchived = { nav.navigate(Routes.ARCHIVED) }, selected = selected)
         }
-        // A soft scrim so rows fade out under the toolbar.
-        Box(
-            Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .height(120.dp)
-                .background(Brush.verticalGradient(0f to Color.Transparent, 0.7f to MaterialTheme.colorScheme.background.copy(alpha = 0.92f), 1f to MaterialTheme.colorScheme.background)),
-        )
         val voice = sh.zeron.android.voice.rememberVoiceVisible(model.voice)
-        HorizontalFloatingToolbar(
-            expanded = expanded,
+        BottomAppBar(
+            actions = {
+                Tip("Settings") {
+                    IconButton(onClick = { nav.navigate(Routes.SETTINGS) }) { ZIcon(ZIcons.Settings, "Settings", Modifier.size(24.dp)) }
+                }
+                Tip("Search") {
+                    IconButton(onClick = { nav.navigate(Routes.SEARCH) }) { ZIcon(ZIcons.Search, "Search", Modifier.size(24.dp)) }
+                }
+                if (voice) {
+                    // Tap calls (or opens the live call); hold picks the host and style.
+                    sh.zeron.android.voice.VoiceHeaderButton(
+                        model.voice,
+                        onOpenStage = { nav.navigate(Routes.VOICE) { launchSingleTop = true } },
+                        onOpenSettings = { nav.navigate(Routes.VOICE_SETTINGS) },
+                        size = 48.dp,
+                        container = Color.Transparent,
+                    )
+                }
+            },
             floatingActionButton = {
                 Tip("New session") {
-                    FloatingToolbarDefaults.VibrantFloatingActionButton(
+                    FloatingActionButton(
                         onClick = { nav.navigate(Routes.NEW) },
                         containerColor = MaterialTheme.colorScheme.primary,
                         contentColor = MaterialTheme.colorScheme.onPrimary,
-                    ) {
-                        ZIcon(ZIcons.NewSession, "New session", Modifier.size(24.dp))
-                    }
+                        elevation = androidx.compose.material3.FloatingActionButtonDefaults.bottomAppBarFabElevation(),
+                    ) { ZIcon(ZIcons.NewSession, "New session", Modifier.size(24.dp)) }
                 }
             },
-            colors = FloatingToolbarDefaults.vibrantFloatingToolbarColors(),
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(bottom = 12.dp),
-        ) {
-            Tip("Settings") {
-                IconButton(onClick = { nav.navigate(Routes.SETTINGS) }) { ZIcon(ZIcons.Settings, "Settings", Modifier.size(24.dp)) }
-            }
-            Tip("Search") {
-                IconButton(onClick = { nav.navigate(Routes.SEARCH) }) { ZIcon(ZIcons.Search, "Search", Modifier.size(24.dp)) }
-            }
-            if (voice) {
-                // Tap calls (or opens the live call); hold picks the host and style.
-                sh.zeron.android.voice.VoiceHeaderButton(
-                    model.voice,
-                    onOpenStage = { nav.navigate(Routes.VOICE) { launchSingleTop = true } },
-                    onOpenSettings = { nav.navigate(Routes.VOICE_SETTINGS) },
-                    size = 40.dp,
-                    container = Color.Transparent,
-                )
-            }
-        }
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            scrollBehavior = bar,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
     }
 }
 
