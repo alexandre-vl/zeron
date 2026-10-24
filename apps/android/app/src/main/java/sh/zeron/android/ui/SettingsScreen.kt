@@ -236,7 +236,7 @@ fun SettingsScreen(model: AppModel, onArchived: () -> Unit, onOpenVoiceSettings:
             }
         }
     }
-    StatusBarScrim(scrolled = list.firstVisibleItemIndex > 0 || list.firstVisibleItemScrollOffset > 0)
+    StatusBarScrim(list)
     }
     if (confirmSignOut) {
         androidx.compose.material3.AlertDialog(

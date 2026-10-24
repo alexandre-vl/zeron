@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -28,7 +29,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -194,9 +197,11 @@ fun NewSessionBar(
 
 val FloatingChromePadding = PaddingValues(bottom = 176.dp)
 
-/** The page tone behind the status bar once content scrolls under it. */
+/** The page tone behind the status bar once `list` scrolls content under it. */
 @Composable
-fun BoxScope.StatusBarScrim(scrolled: Boolean) {
+fun BoxScope.StatusBarScrim(list: LazyListState) {
+    // Derived: a raw scroll-offset read would recompose the calling screen on every scroll frame.
+    val scrolled by remember(list) { derivedStateOf { list.firstVisibleItemIndex > 0 || list.firstVisibleItemScrollOffset > 0 } }
     val color by animateColorAsState(
         if (scrolled) MaterialTheme.colorScheme.background else Color.Transparent,
         label = "status-scrim",
