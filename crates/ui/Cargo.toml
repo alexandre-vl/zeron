@@ -53,6 +53,10 @@ name = "subagent-fold-fixture"
 required-features = ["appshots-fixture", "resource-profile"]
 
 [[example]]
+name = "remote-sync-fixture"
+required-features = ["appshots-fixture"]
+
+[[example]]
 name = "pull-request-fixture"
 required-features = ["pull-request-fixture"]
 

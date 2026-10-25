@@ -1,14 +1,15 @@
 # Remote chat opening reads as an outage
 
-Base: `1ec71a31` (main, v0.2.120). Verified on macOS with unit, gpui and
-in-process relay tests, and against a local `wrangler dev` edge with two
-headless engines. The reporting desktop and its host were not exercised, so
+Base: `c04e3749` (main, v0.2.124); the work began on `1ec71a31` (v0.2.120).
+Verified on macOS with unit, gpui and in-process relay tests, against a local
+`wrangler dev` edge with two headless engines, and in captures of the
+production shell. The reporting desktop and its host were not exercised, so
 this is not a claim about the installed application.
 
 Opening a chat hosted on another device over a slow edge showed a blank
-transcript with no indicator, then "Reconnecting — messages will send once the
-connection recovers." although nothing had been sent. Revisits repeated both
-with no loading cue. The desktop log for the reported chat shows its first
+transcript with no indicator, then "Messages will send once the connection
+recovers." although nothing had been sent. Revisits repeated both with no
+loading cue. The desktop log for the reported chat shows its first
 STATE frame 12.7 s after admission on the cold open and 8.7 s on a revisit,
 and the revisit replaying rows from the checkpoint (`repair from=1741 to=5`).
 
@@ -82,6 +83,26 @@ Ten defects were found:
   host writes the fork's row before it answers, and the answer can time out
   after the fork exists: opening the row turns the waiting tab into the chat.
   A tab closed while forking stays closed, and the fork lists under its parent.
+
+## Screenshots
+
+`crates/ui/examples/remote-sync-fixture.rs` attaches the production shell to
+a real engine with isolated data, as at launch, and plays the edge and the
+host "omarchy" over that engine: the chats and devices, each room's
+connectivity, each transcript's opening frame, and a fork that waits 6 s
+before the engine, which has no edge, refuses it. The same fixture ran on
+`c04e3749` and on this branch. Captures are taken 5 s after opening, past the
+composer's 4 s hold. In [`docs/screenshots/remote-chat-sync`](../screenshots/remote-chat-sync):
+
+| Scene | Before (`before-*.png`) | After (`after-*.png`) |
+| --- | --- | --- |
+| `cold-open`: never synced here, room dialing | Blank; "Messages will send once the connection recovers."; sidebar "Syncing…" | Centered "Syncing…" loader |
+| `revisit`: cached copy, room rejoining | The same false notice and pill | "Syncing…" above the composer |
+| `outage`: this device lost the edge | "Messages will send once the connection recovers." | "Reconnecting…" |
+| `outage-draft`: the same, with a draft | The same notice | "Reconnecting — messages will send once the connection recovers." |
+| `side-chat`: a side chat opened cold | Blank tab with the false notice | Loader in the tab |
+| `fork-waiting`: 2.5 s into a fork | Nothing | "Forking on omarchy…" tab |
+| `fork-failed`: the host's answer fails | Error in the parent's composer | Error and Retry in the tab |
 
 ## Before/after proof
 
@@ -196,21 +217,34 @@ cargo +1.99.0 test --locked -p zeron-engine --lib
 cargo +1.99.0 test --locked -p zeron-engine --lib -- slow_hello_reads_as_connecting rejoin_after_idle_retirement
 cargo +1.99.0 test --locked -p zeron-ui --lib -- --skip a_queued_file_reads_back_with_its_bytes_and_display_name --skip generated_image_chunk_reader_targets_owner_and_bounds_decode
 cargo +1.99.0 test --locked -p zeron-ui --lib -- --test-threads=1 a_queued_file_reads_back_with_its_bytes_and_display_name generated_image_chunk_reader_targets_owner_and_bounds_decode
+cargo +1.99.0 run --locked -p zeron-ui --features appshots-fixture --example remote-sync-fixture -- <dir> cold-open
 ```
 
-Validation: 620 engine tests pass (4 ignored) and 1,883 UI tests pass
-(1,861 before the change). The two relay tests passed five consecutive runs.
-Changed hunks pass rustfmt; `git diff --check` passes.
+The fixture's scenes are `cold-open`, `revisit`, `outage`, `outage-draft`,
+`side-chat` and `fork`. For the before set, the fixture, its `[[example]]`
+entry and its four hooks (`Shell::fixture_open_chat`,
+`Shell::fixture_open_side_chat`, `Shell::fixture_fork_chat`,
+`Composer::fixture_draft`, each one call into the production path) were
+applied unchanged to `c04e3749`.
+
+Validation, after rebasing onto `c04e3749`: 634 engine tests pass (5
+ignored) and 1,897 UI tests pass; 4 and 22 of them are new. The mutation runs
+and the real-edge run above were made on `1ec71a31`; the rebase changed
+nothing in `crates/sync`, the chat host or its persistence. The two relay
+tests passed five consecutive runs. Changed hunks pass rustfmt; `git diff
+--check` passes.
 
 The two attachment tests run on their own because they predate this change
 and race in parallel: each builds a real macOS platform without the guard
 `typography::native_text_system` takes, and two at once abort the whole run
 (`Text Input Sources or Text Services Manager API is being called in two
-threads concurrently`). Taking that guard in both would let them run with the
-rest.
+threads concurrently`). CI runs the UI tests under nextest, one process per
+test, where they cannot race. Taking that guard in both would let them run
+with the rest under `cargo test`.
 
 Not verified: the installed desktop against the reporting host over a slow
-link (the UI was verified by gpui tests, including where the loader renders),
-any added latency on the local edge, and iOS, which keeps the same 4 s grace
+link (the UI was verified by gpui tests, including where the loader renders,
+and by the captures, whose edge and host are scripted), any added latency on
+the local edge, and iOS, which keeps the same 4 s grace
 (`crates/client/src/connectivity.rs`). Rooms still retire between visits;
 keeping them open longer is a separate change.

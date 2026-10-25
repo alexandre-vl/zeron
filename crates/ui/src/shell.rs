@@ -19041,6 +19041,18 @@ impl Shell {
     pub fn fixture_transcript(&self) -> Entity<crate::transcript::Transcript> {
         self.transcript.clone()
     }
+    /// A session row's click in the sidebar.
+    pub fn fixture_open_chat(&mut self, chat_id: &str, cx: &mut Context<Self>) {
+        self.open_chat(chat_id.to_owned(), cx);
+    }
+    /// A side chat's row under its parent.
+    pub fn fixture_open_side_chat(&mut self, chat_id: &str, cx: &mut Context<Self>) {
+        self.open_child_chat_tab(chat_id, cx);
+    }
+    /// The session card's "Fork chat".
+    pub fn fixture_fork_chat(&mut self, cx: &mut Context<Self>) {
+        self.create_side_chat(cx);
+    }
 }
 
 #[cfg(test)]

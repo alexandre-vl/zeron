@@ -16982,6 +16982,11 @@ impl Composer {
         self.appshots.clear();
         cx.notify();
     }
+    /// A typed draft, as the input holds it.
+    pub fn fixture_draft(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.input.update(cx, |input, cx| input.set_text(text, cx));
+        cx.notify();
+    }
 }
 
 #[cfg(test)]
