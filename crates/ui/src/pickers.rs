@@ -4901,6 +4901,7 @@ impl Pickers {
                 .when(!favorites_view, |el| {
                     el.hover(|s| s.bg(crate::theme::ink(0.06)))
                 })
+                .tooltip(|_, cx| cx.new(|_| compact::PickerHint("Starred".into())).into())
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.setting_menu = None;
                     this.model_rail = ModelRail::Favorites;
@@ -4927,6 +4928,7 @@ impl Pickers {
             let harness = descriptor.id;
             let is_viewed = !favorites_view && effective == Some(harness);
             let (icon_path, tint) = harness_brand_icon(harness);
+            let name: SharedString = descriptor.name.clone().into();
             tabs =
                 tabs.child(
                     div()
@@ -4940,6 +4942,7 @@ impl Pickers {
                         .justify_center()
                         .cursor_pointer()
                         .when(!is_viewed, |el| el.hover(|s| s.bg(crate::theme::ink(0.06))))
+                        .tooltip(move |_, cx| cx.new(|_| compact::PickerHint(name.clone())).into())
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.setting_menu = None;
                             this.model_rail = ModelRail::Harness;
@@ -5388,6 +5391,14 @@ impl Pickers {
                 .justify_center()
                 .cursor_pointer()
                 .hover(|s| s.bg(crate::theme::ink(0.08)))
+                .tooltip(move |_, cx| {
+                    let hint = if is_fav {
+                        "Remove from favorites"
+                    } else {
+                        "Add to favorites"
+                    };
+                    cx.new(|_| compact::PickerHint(hint.into())).into()
+                })
                 .on_click(cx.listener(move |this, _, _, cx| {
                     cx.stop_propagation();
                     this.toggle_model_favorite(harness, &star_model, cx);

@@ -611,6 +611,7 @@ impl Shell {
                         }
                         cx.notify();
                     }))
+                    .tooltip(crate::settings::widgets::text_tooltip(label))
                     .child(
                         icon(action_icon(kind))
                             .size(px(16.0))

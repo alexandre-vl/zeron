@@ -343,6 +343,7 @@ impl HarnessesPage {
             .tab_index(0)
             .role(gpui::Role::Button)
             .aria_label("Check for agents and updates")
+            .tooltip(widgets::text_tooltip("Check for agents and updates"))
             .focus_visible(|s| s.border_2().border_color(theme.accent))
             .cursor_pointer()
             .hover(|style| style.bg(crate::theme::ink(0.05)))

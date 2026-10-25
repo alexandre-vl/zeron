@@ -863,6 +863,7 @@ impl Shell {
                                     this.section_dialog = None;
                                     cx.notify();
                                 }))
+                                .tooltip(crate::settings::widgets::text_tooltip("Close"))
                                 .child(
                                     icon(icons::CLOSE)
                                         .size(px(16.0))
