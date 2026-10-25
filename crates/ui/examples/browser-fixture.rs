@@ -173,6 +173,18 @@ fn main() -> anyhow::Result<()> {
             let mut request = [0; 4096];
             let n = stream.read(&mut request).unwrap_or(0);
             let request = String::from_utf8_lossy(&request[..n]);
+            // The bench's video, from `ZERON_BROWSER_BENCH_VIDEO`.
+            if request.starts_with("GET /bench.mp4 ")
+                && let Some(video) = std::env::var_os("ZERON_BROWSER_BENCH_VIDEO").and_then(|path| std::fs::read(path).ok())
+            {
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: video/mp4\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    video.len()
+                );
+                let _ = stream.write_all(&video);
+                continue;
+            }
             let (title, html) = if request.starts_with("GET /two ") {
                 (
                     "Details",
@@ -264,7 +276,7 @@ fn main() -> anyhow::Result<()> {
                     pause(cx, 500).await;
                     #[cfg(target_os = "linux")]
                     if let Some(seconds) = std::env::var("ZERON_BROWSER_BENCH").ok().and_then(|s| s.parse().ok()) {
-                        return linux::bench(window, first.clone(), &output, seconds, cx).await;
+                        return linux::bench(window, first.clone(), &_origin, &output, seconds, cx).await;
                     }
                     capture_frame(window, &output, "browser-preview-dark", cx).await?;
                     // Real DOM click, native navigation and history.

@@ -64,6 +64,7 @@ HTTP(S) links in chat open new Browser tabs in their conversation. If the runtim
 | --- | --- |
 | `ZERON_BROWSER_ENGINE=wpe` or `gtk` | Use that engine, without falling back to the other. |
 | `ZERON_BROWSER_DMABUF=0` | WPE WebKit renders on the CPU into shared memory. |
+| `ZERON_BROWSER_DMABUF=readback` | WPE WebKit renders on the GPU, and the helper reads its frames back into shared memory. |
 | `ZERON_WPE=0` | At build time, leave the WPE helper out. |
 | `ZERON_WPE_HELPER=<path>` | Debug builds run this WPE helper instead of the embedded one. |
 
@@ -85,4 +86,4 @@ ZERON_BROWSER_ENGINE=wpe ZERON_BROWSER_CAPTURE_COMMAND=./capture.sh \
   target/debug/examples/browser-fixture /tmp/browser-fixture
 ```
 
-It checks input, clipboard, menus, resizes and captures, and fails if an animating page falls behind the display (WebKitGTK: behind 60 Hz), stops getting vblanks once shown again, or WebKit keeps more than six buffers for one page. `ZERON_BROWSER_BENCH=<seconds>` instead measures a page that repaints its whole viewport every frame, writing its frame rate, the display's, and the CPU Zeron and WebKit use to `bench.json`.
+It checks input, clipboard, menus, resizes and captures, and fails if an animating page falls behind the display (WebKitGTK: behind 60 Hz), stops getting vblanks once shown again, or WebKit keeps more than six buffers for one page. `ZERON_BROWSER_BENCH=<seconds>` instead measures pages that repaint their whole viewport every frame (a 2D canvas, WebGL 2, scrolling) or a small part of it (a CSS spinner), a 60 fps video when `ZERON_BROWSER_BENCH_VIDEO` names an MP4, how long a press takes to reach a painted frame, and an idle page. It writes to `bench.json` the page's frame rate, when GPUI painted each frame, the bytes copied to show them, and the CPU, memory and NVIDIA GPU memory Zeron and WebKit use. `ZERON_BROWSER_BENCH_WIDTH` sets the browser's width in logical pixels.

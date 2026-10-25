@@ -488,6 +488,8 @@ pub(super) struct Presenter {
     refresh_mhz: u32,
     focused: Option<bool>,
     active: Option<bool>,
+    #[cfg(feature = "browser-fixture")]
+    pub(super) log: super::FrameLog,
 }
 
 impl Presenter {
@@ -508,6 +510,8 @@ impl Presenter {
             refresh_mhz: 60_000,
             focused: None,
             active: None,
+            #[cfg(feature = "browser-fixture")]
+            log: Default::default(),
         }
     }
 
@@ -695,6 +699,8 @@ impl Presenter {
                     scale: frame.scale,
                 });
                 self.frame_done(window);
+                #[cfg(feature = "browser-fixture")]
+                self.log.painted();
             }
             Err(error) if buffer.kind == Kind::Dmabuf && !self.readback => {
                 // The helper resends this frame, and every later one, through
@@ -741,7 +747,7 @@ impl Presenter {
             if regions.is_empty() {
                 regions.push(whole);
             }
-            match buffer.kind {
+            let result = match buffer.kind {
                 Kind::Shm => Self::copy_pixels(window, image, buffer, &regions, &mut release),
                 Kind::Dmabuf => {
                     // An import that worked before only fails once the GPU device
@@ -756,7 +762,13 @@ impl Presenter {
                         result => result,
                     }
                 }
+            };
+            #[cfg(feature = "browser-fixture")]
+            if result.is_ok() {
+                let pixels: i64 = regions.iter().map(|r| i64::from(r.size.width.0) * i64::from(r.size.height.0)).sum();
+                self.log.copied(pixels as u64 * 4, buffer.kind == Kind::Dmabuf);
             }
+            result
         })();
         if let Some(release) = release {
             // An error came before any update took it. The atlas still runs a

@@ -485,12 +485,14 @@ fn spawn_wpe(
     if let Some(profile) = profile {
         command.arg("--profile").arg(profile);
     }
-    // `ZERON_BROWSER_DMABUF=0` keeps frames in shared memory.
-    if let Some(gpu) = gpu.filter(|_| std::env::var("ZERON_BROWSER_DMABUF").as_deref() != Ok("0")) {
+    // `ZERON_BROWSER_DMABUF=0` keeps frames in shared memory, rendered by the
+    // CPU; `readback` renders them on the GPU and reads them back.
+    let dmabuf = std::env::var("ZERON_BROWSER_DMABUF");
+    if let Some(gpu) = gpu.filter(|_| dmabuf.as_deref() != Ok("0")) {
         command.arg("--render-node").arg(&gpu.render_node);
         // WebKit renders in one of these layouts where it can, so GPUI imports
         // frames without copies; the helper reads the others back.
-        if !gpu.modifiers.is_empty() {
+        if !gpu.modifiers.is_empty() && dmabuf.as_deref() != Ok("readback") {
             let modifiers: Vec<_> = gpu.modifiers.iter().map(|m| format!("{m:x}")).collect();
             command.arg("--modifiers").arg(modifiers.join(","));
         }
@@ -593,6 +595,43 @@ impl Worker {
     }
 }
 
+/// The browser fixture's account of the frames GPUI painted for a page, and of
+/// the bytes copied into its atlas tile to show them.
+#[cfg(feature = "browser-fixture")]
+#[derive(Default)]
+struct FrameLog {
+    painted: u64,
+    /// When the latest frame was painted.
+    last: Option<std::time::Instant>,
+    /// When each frame was painted, while the fixture records them.
+    times: Option<Vec<std::time::Instant>>,
+    /// Bytes copied from CPU memory, and between GPU buffers.
+    uploaded: u64,
+    copied: u64,
+    /// The WebKitGTK image painted last: GPUI uploads each new one whole.
+    image: Option<gpui::ImageId>,
+}
+
+#[cfg(feature = "browser-fixture")]
+impl FrameLog {
+    fn painted(&mut self) {
+        let now = std::time::Instant::now();
+        self.painted += 1;
+        self.last = Some(now);
+        if let Some(times) = &mut self.times {
+            times.push(now);
+        }
+    }
+
+    fn copied(&mut self, bytes: u64, on_gpu: bool) {
+        if on_gpu {
+            self.copied += bytes;
+        } else {
+            self.uploaded += bytes;
+        }
+    }
+}
+
 pub struct NativePage {
     worker: Arc<Worker>,
     route: Arc<Route>,
@@ -609,6 +648,8 @@ pub struct NativePage {
     pub pressed: std::cell::Cell<Option<gpui::MouseButton>>,
     /// WPE WebKit pages: their frames, imports and vblank.
     presenter: Option<wpe::Presenter>,
+    #[cfg(feature = "browser-fixture")]
+    log: FrameLog,
 }
 impl NativePage {
     /// Extract, spawn and handshake entirely off the UI thread. Concurrent
@@ -682,6 +723,8 @@ impl NativePage {
             preedit: String::new(),
             pressed: std::cell::Cell::new(None),
             presenter,
+            #[cfg(feature = "browser-fixture")]
+            log: FrameLog::default(),
         })
     }
     pub(super) fn engine(&self) -> Engine {
@@ -728,6 +771,11 @@ impl NativePage {
             let Some(image) = &self.image else {
                 return;
             };
+            #[cfg(feature = "browser-fixture")]
+            if self.log.image.replace(image.id) != Some(image.id) {
+                self.log.painted();
+                self.log.copied(image.as_bytes(0).map_or(0, |b| b.len() as u64), false);
+            }
             if let Some(bytes) = image.as_bytes(0).filter(|b| b.len() >= 4) {
                 let color = gpui::rgb(
                     ((bytes[2] as u32) << 16) | ((bytes[1] as u32) << 8) | bytes[0] as u32,
@@ -825,6 +873,13 @@ impl NativePage {
     #[cfg(feature = "browser-fixture")]
     pub fn evaluation(&self) -> Option<Value> {
         self.route.evaluation.lock().unwrap().take()
+    }
+    #[cfg(feature = "browser-fixture")]
+    fn log(&mut self) -> &mut FrameLog {
+        match &mut self.presenter {
+            Some(presenter) => &mut presenter.log,
+            None => &mut self.log,
+        }
     }
 }
 impl Drop for NativePage {
@@ -1067,6 +1122,19 @@ impl super::BrowserSurface {
     }
     pub fn fixture_linux_evaluation(&self) -> Option<Value> {
         self.native.as_ref().unwrap().evaluation()
+    }
+    /// The frames GPUI painted for the page so far, the bytes copied into its
+    /// tile from CPU memory and between GPU buffers, and when the latest was
+    /// painted.
+    pub fn fixture_linux_painted(&mut self) -> (u64, u64, u64, Option<std::time::Instant>) {
+        let log = self.native.as_mut().unwrap().log();
+        (log.painted, log.uploaded, log.copied, log.last)
+    }
+    /// Starts listing when each frame is painted; `false` stops and returns
+    /// the list.
+    pub fn fixture_linux_record(&mut self, on: bool) -> Vec<std::time::Instant> {
+        let log = self.native.as_mut().unwrap().log();
+        std::mem::replace(&mut log.times, on.then(Vec::new)).unwrap_or_default()
     }
     /// How WPE WebKit frames reach GPUI; `null` with WebKitGTK.
     pub fn fixture_linux_frames(&self) -> Value {
