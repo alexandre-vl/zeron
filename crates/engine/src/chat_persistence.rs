@@ -286,6 +286,17 @@ mod tests {
         (dir, doc, store, persistence)
     }
 
+    #[test]
+    fn an_unverified_cursor_opens_at_zero() {
+        let (_dir, doc, store, _) = fixture();
+        let bytes = doc.export_snapshot().unwrap();
+        store
+            .save_snapshot_with_cursor("legacy", &bytes, 500, 2)
+            .unwrap();
+        let persistence = ChatPersistence::new(&doc, store, "legacy".into(), 500);
+        assert_eq!(persistence.cursor(), 0);
+    }
+
     #[tokio::test]
     async fn replay_burst_coalesces_and_flush_bypasses_debounce() {
         let (_dir, doc, store, persistence) = fixture();
