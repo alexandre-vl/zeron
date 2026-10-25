@@ -51,25 +51,38 @@ impl BrowserSurface {
                 cx.stop_propagation();
                 return;
             }
-            if event.keystroke.modifiers.control && !event.keystroke.modifiers.alt {
-                if let Some(native) = &self.native {
-                    match event.keystroke.key.as_str() {
-                        "c" | "x" => {
-                            native.command(serde_json::json!({"cmd":if event.keystroke.key=="c" {"copy"} else {"cut"}}));
-                            cx.stop_propagation();
-                            return;
-                        }
-                        "v" => {
-                            if let Some(text) =
-                                cx.read_from_clipboard().and_then(|item| item.text())
-                            {
-                                native.command(serde_json::json!({"cmd":"text","text":text}));
-                            }
-                            cx.stop_propagation();
-                            return;
-                        }
-                        _ => {}
+            let wpe = self
+                .native
+                .as_ref()
+                .is_some_and(|native| native.engine() == super::linux::Engine::Wpe);
+            if wpe {
+                // WebKit runs its own copy, cut and paste; it reads the system
+                // clipboard through the copy shared here.
+                let mods = event.keystroke.modifiers;
+                let key = event.keystroke.key.as_str();
+                if (mods.control && key == "v") || (mods.shift && key == "insert") {
+                    self.linux_share_clipboard(cx);
+                }
+            } else if event.keystroke.modifiers.control
+                && !event.keystroke.modifiers.alt
+                && let Some(native) = &self.native
+            {
+                match event.keystroke.key.as_str() {
+                    "c" | "x" => {
+                        native.command(serde_json::json!({"cmd":if event.keystroke.key=="c" {"copy"} else {"cut"}}));
+                        cx.stop_propagation();
+                        return;
                     }
+                    "v" => {
+                        if let Some(text) =
+                            cx.read_from_clipboard().and_then(|item| item.text())
+                        {
+                            native.command(serde_json::json!({"cmd":"text","text":text}));
+                        }
+                        cx.stop_propagation();
+                        return;
+                    }
+                    _ => {}
                 }
             }
             self.linux_key(&event.keystroke, true);
@@ -741,9 +754,8 @@ impl Render for BrowserSurface {
             if self.page.error.is_some() {
                 body.child(self.empty_body(&theme, cx))
             } else {
-                let image = native.image.clone();
-                let image_scale = native.image_scale;
                 let entity = cx.entity().downgrade();
+                let wpe = native.engine() == super::linux::Engine::Wpe;
                 body.child(gpui::canvas(|_,_,_| (), move |bounds,_,window,cx| {
                     let scale = window.scale_factor();
                     if let Some(view)=entity.upgrade() {
@@ -751,46 +763,43 @@ impl Render for BrowserSurface {
                         window.handle_input(&focus,gpui::ElementInputHandler::new(bounds,view),cx);
                     }
                     let _ = entity.update(cx, |this,_| {
-                        if let Some(native)=&mut this.native { native.sync(bounds,scale); }
+                        let focused = this.focus.is_focused(window);
+                        if let Some(native)=&mut this.native {
+                            native.sync(bounds,scale);
+                            native.paint(bounds, focused, window);
+                        }
                     });
                     let capture=entity.clone();
                     window.on_mouse_event(move |event: &gpui::MouseMoveEvent,phase,_,cx| {
                         if phase==gpui::DispatchPhase::Bubble && !bounds.contains(&event.position) && !cx.has_active_drag() {
                             let _=capture.update(cx,|this,_| {
                                 if this.native.as_ref().is_some_and(|n|n.pressed.get().is_some()) {
-                                    this.linux_pointer("move",event.position,event.pressed_button,event.modifiers);
+                                    this.linux_pointer("move",event.position,event.pressed_button,event.modifiers,0);
                                 }
                             });
                         }
                     });
-                    if let Some(image)=&image {
-                        if let Some(bytes)=image.as_bytes(0).filter(|b| b.len() >= 4) {
-                            let color=gpui::rgb(((bytes[2] as u32)<<16)|((bytes[1] as u32)<<8)|bytes[0] as u32);
-                            window.paint_quad(gpui::fill(bounds,color));
-                        }
-                        let dimensions=image.size(0);
-                        // Keep the previous frame at its original scale while
-                        // WebKit reflows; clipping never stretches the page.
-                        let viewport=gpui::Bounds::new(bounds.origin,gpui::size(px(dimensions.width.0 as f32/image_scale),px(dimensions.height.0 as f32/image_scale)));
-                        let _=window.paint_image(viewport,gpui::Corners::default(),image.clone(),0,false);
-                    }
                 }).absolute().inset_0())
+                .cursor(self.page_cursor)
+                .when(wpe, |body| body.on_hover(cx.listener(|this, hovered: &bool, window, _| {
+                    if !*hovered {
+                        this.linux_pointer("leave", window.mouse_position(), None, window.modifiers(), 0);
+                    }
+                })))
                 .on_mouse_down(MouseButton::Left,cx.listener(|this,event: &gpui::MouseDownEvent,w,cx| {
-                    if !cx.has_active_drag() { w.focus(&this.focus,cx); this.linux_pointer("down",event.position,Some(event.button),event.modifiers); cx.stop_propagation(); }
+                    if !cx.has_active_drag() { w.focus(&this.focus,cx); this.linux_pointer("down",event.position,Some(event.button),event.modifiers,event.click_count); cx.stop_propagation(); }
                 }))
                 .on_mouse_down(MouseButton::Right,cx.listener(|this,event: &gpui::MouseDownEvent,w,cx| {
-                    w.focus(&this.focus,cx);this.linux_pointer("down",event.position,Some(event.button),event.modifiers);cx.stop_propagation();
+                    w.focus(&this.focus,cx);this.linux_pointer("down",event.position,Some(event.button),event.modifiers,event.click_count);cx.stop_propagation();
                 }))
-                .on_mouse_up(MouseButton::Left,cx.listener(|this,event: &gpui::MouseUpEvent,_,cx| {this.linux_pointer("up",event.position,Some(event.button),event.modifiers);cx.stop_propagation();}))
-                .on_mouse_up_out(MouseButton::Left,cx.listener(|this,event: &gpui::MouseUpEvent,_,_| {this.linux_pointer("up",event.position,Some(event.button),event.modifiers);}))
-                .on_mouse_up(MouseButton::Right,cx.listener(|this,event: &gpui::MouseUpEvent,_,cx| {this.linux_pointer("up",event.position,Some(event.button),event.modifiers);cx.stop_propagation();}))
-                .on_mouse_down(MouseButton::Middle,cx.listener(|this,event: &gpui::MouseDownEvent,w,cx| {w.focus(&this.focus,cx);this.linux_pointer("down",event.position,Some(event.button),event.modifiers);cx.stop_propagation();}))
-                .on_mouse_up(MouseButton::Middle,cx.listener(|this,event: &gpui::MouseUpEvent,_,cx| {this.linux_pointer("up",event.position,Some(event.button),event.modifiers);cx.stop_propagation();}))
-                .on_mouse_move(cx.listener(|this,event: &gpui::MouseMoveEvent,_,cx| {if !cx.has_active_drag(){this.linux_pointer("move",event.position,event.pressed_button,event.modifiers);}}))
+                .on_mouse_up(MouseButton::Left,cx.listener(|this,event: &gpui::MouseUpEvent,_,cx| {this.linux_pointer("up",event.position,Some(event.button),event.modifiers,event.click_count);cx.stop_propagation();}))
+                .on_mouse_up_out(MouseButton::Left,cx.listener(|this,event: &gpui::MouseUpEvent,_,_| {this.linux_pointer("up",event.position,Some(event.button),event.modifiers,event.click_count);}))
+                .on_mouse_up(MouseButton::Right,cx.listener(|this,event: &gpui::MouseUpEvent,_,cx| {this.linux_pointer("up",event.position,Some(event.button),event.modifiers,event.click_count);cx.stop_propagation();}))
+                .on_mouse_down(MouseButton::Middle,cx.listener(|this,event: &gpui::MouseDownEvent,w,cx| {w.focus(&this.focus,cx);this.linux_pointer("down",event.position,Some(event.button),event.modifiers,event.click_count);cx.stop_propagation();}))
+                .on_mouse_up(MouseButton::Middle,cx.listener(|this,event: &gpui::MouseUpEvent,_,cx| {this.linux_pointer("up",event.position,Some(event.button),event.modifiers,event.click_count);cx.stop_propagation();}))
+                .on_mouse_move(cx.listener(|this,event: &gpui::MouseMoveEvent,_,cx| {if !cx.has_active_drag(){this.linux_pointer("move",event.position,event.pressed_button,event.modifiers,0);}}))
                 .on_scroll_wheel(cx.listener(|this,event: &gpui::ScrollWheelEvent,_,cx| {
-                    if let Some(native)=&this.native {
-                        let delta=event.delta.pixel_delta(px(16.));let p=event.position-native.bounds.origin;
-                        native.command(serde_json::json!({"cmd":"scroll","x":f32::from(p.x),"y":f32::from(p.y),"dx":-f32::from(delta.x)/40.,"dy":-f32::from(delta.y)/40.,"mods":super::linux::modifiers_mask(event.modifiers)}));
+                    if this.linux_scroll(event) {
                         cx.stop_propagation();
                     }
                 }))

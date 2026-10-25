@@ -8,8 +8,11 @@ use zeron_ui::browser::BrowserSurface;
 /// initial pause on a loaded runner. Yield to GPUI until X11 maps the window;
 /// blocking this thread would prevent the frame we're waiting for.
 pub(super) async fn wait_for_visible_window(cx: &mut AsyncApp) -> anyhow::Result<()> {
-    // Wayland captures the already-mapped nested compositor's X11 window.
-    if std::env::var("ZERON_BROWSER_CAPTURE_WINDOW").is_ok_and(|id| !id.is_empty()) {
+    // Wayland captures the already-mapped nested compositor's X11 window or
+    // its only output.
+    if std::env::var("ZERON_BROWSER_CAPTURE_WINDOW").is_ok_and(|id| !id.is_empty())
+        || std::env::var_os("ZERON_BROWSER_CAPTURE_COMMAND").is_some()
+    {
         return Ok(());
     }
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
@@ -134,6 +137,125 @@ fn click(
         cx,
     )
 }
+/// A page that repaints its whole viewport every frame: a canvas of moving
+/// shapes under a CSS-animated card. `window.benchFrames` counts its frames.
+const BENCH_PAGE: &str = "document.body.innerHTML='';document.body.style.margin='0';\
+let c=document.createElement('canvas');c.style='position:fixed;inset:0;width:100vw;height:100vh';\
+let card=document.createElement('div');card.textContent='Zeron';\
+card.style='position:fixed;left:40%;top:40%;padding:24px 48px;font:600 32px system-ui;color:#fff;background:#29483bcc;border-radius:16px;box-shadow:0 12px 40px #0008;animation:spin 2s linear infinite';\
+let style=document.createElement('style');style.textContent='@keyframes spin{to{transform:rotate(360deg)}}';\
+document.head.append(style);document.body.append(c,card);let g=c.getContext('2d');window.benchFrames=0;\
+function frame(t){let w=innerWidth*devicePixelRatio,h=innerHeight*devicePixelRatio;\
+if(c.width!==w||c.height!==h){c.width=w;c.height=h}g.fillStyle='#10201a';g.fillRect(0,0,w,h);\
+for(let i=0;i<1500;i++){let a=t/900+i*0.37;g.fillStyle='hsl('+(i*7+t/20)%360+' 70% 60%)';\
+g.fillRect((Math.sin(a)*0.45+0.5)*w,(Math.cos(a*1.3)*0.45+0.5)*h,14,14)}\
+window.benchFrames++;requestAnimationFrame(frame)}requestAnimationFrame(frame);true";
+
+/// CPU seconds this process and its descendants (the browser engine's
+/// processes) have used so far.
+fn cpu_seconds() -> (f64, f64) {
+    let me = std::process::id();
+    let ticks = unsafe { libc::sysconf(libc::_SC_CLK_TCK) } as f64;
+    let mut parents = std::collections::HashMap::new();
+    let mut used = std::collections::HashMap::new();
+    for entry in std::fs::read_dir("/proc").into_iter().flatten().flatten() {
+        let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else {
+            continue;
+        };
+        let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else {
+            continue;
+        };
+        // Fields after the parenthesized command name: state, ppid, ... utime
+        // is the 14th field overall, stime the 15th.
+        let fields: Vec<&str> = stat[stat.rfind(')').unwrap_or(0) + 2..].split(' ').collect();
+        let field = |i: usize| fields.get(i - 3).and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.);
+        parents.insert(pid, field(4) as u32);
+        used.insert(pid, (field(14) + field(15)) / ticks);
+    }
+    let descends = |mut pid: u32| {
+        while let Some(&parent) = parents.get(&pid) {
+            if parent == me {
+                return true;
+            }
+            if parent <= 1 {
+                return false;
+            }
+            pid = parent;
+        }
+        false
+    };
+    let engine = used.iter().filter(|(pid, _)| descends(**pid)).map(|(_, s)| s).sum();
+    (used.get(&me).copied().unwrap_or(0.), engine)
+}
+
+/// Counts the window's display frames until the returned counter is dropped.
+fn count_display_frames(window: &gpui::Window) -> std::rc::Rc<std::cell::Cell<u32>> {
+    fn next(window: &gpui::Window, count: std::rc::Rc<std::cell::Cell<u32>>) {
+        window.on_next_display_frame(move |window, _| {
+            if std::rc::Rc::strong_count(&count) > 1 {
+                count.set(count.get() + 1);
+                next(window, count);
+            }
+        });
+    }
+    let count = std::rc::Rc::default();
+    next(window, std::rc::Rc::clone(&count));
+    count
+}
+
+/// Frames per second over `millis`: the page's, counted by the script
+/// `frames`, and the display's, from the window's frame callbacks.
+async fn frame_rates(
+    window: WindowHandle<shell::Shell>,
+    page: &Entity<BrowserSurface>,
+    frames: &str,
+    millis: u64,
+    cx: &mut AsyncApp,
+) -> anyhow::Result<(f64, f64)> {
+    let display = AnyWindowHandle::from(window).update(cx, |_, w, _| count_display_frames(w))?;
+    let before = eval(page, frames, cx).await?.as_f64().unwrap_or(0.);
+    let (start, shown) = (std::time::Instant::now(), display.get());
+    pause(cx, millis).await;
+    let after = eval(page, frames, cx).await?.as_f64().unwrap_or(0.);
+    let elapsed = start.elapsed().as_secs_f64();
+    Ok(((after - before) / elapsed, f64::from(display.get() - shown) / elapsed))
+}
+
+/// `ZERON_BROWSER_BENCH=<seconds>`: how fast a page that repaints all of a
+/// large viewport every frame renders, and what that costs, with this run's
+/// engine and frame path. Writes `bench.json`.
+pub async fn bench(
+    window: WindowHandle<shell::Shell>,
+    page: Entity<BrowserSurface>,
+    output: &std::path::Path,
+    seconds: f64,
+    cx: &mut AsyncApp,
+) -> anyhow::Result<()> {
+    window.update(cx, |s, _, cx| s.fixture_resize_browser(1400., cx))?;
+    eval(&page, BENCH_PAGE, cx).await?;
+    pause(cx, 2000).await;
+    let (zeron, engine) = cpu_seconds();
+    let start = std::time::Instant::now();
+    let (fps, display_fps) =
+        frame_rates(window, &page, "window.benchFrames", (seconds * 1000.) as u64, cx).await?;
+    let (zeron_after, engine_after) = cpu_seconds();
+    let elapsed = start.elapsed().as_secs_f64();
+    let scale = AnyWindowHandle::from(window).update(cx, |_, w, _| w.scale_factor())?;
+    let bounds = page.read_with(cx, |b, _| b.fixture_linux_bounds());
+    let result = serde_json::json!({
+        "engine": std::env::var("ZERON_BROWSER_ENGINE").unwrap_or_default(),
+        "frames": page.read_with(cx, |b, _| b.fixture_linux_frames()),
+        "viewport": [f32::from(bounds.size.width) * scale, f32::from(bounds.size.height) * scale],
+        "fps": fps,
+        "displayFps": display_fps,
+        "zeronCpu": (zeron_after - zeron) / elapsed * 100.,
+        "engineCpu": (engine_after - engine) / elapsed * 100.,
+    });
+    println!("{result}");
+    std::fs::write(output.join("bench.json"), serde_json::to_vec_pretty(&result)?)?;
+    Ok(())
+}
+
 pub async fn exercise(
     window: WindowHandle<shell::Shell>,
     page: Entity<BrowserSurface>,
@@ -215,47 +337,54 @@ pub async fn exercise(
         // Restore caret to end after the real seat-focus click.
         eval(&page,"(()=>{let e=document.getElementById('browser-input');e.setSelectionRange(e.value.length,e.value.length);return true})()",cx).await?;
     }
-    cx.update(|cx| cx.write_to_clipboard(gpui::ClipboardItem::new_string(" — café 日本語".into())));
-    pause(cx, 200).await;
-    let paste = gpui::Keystroke::parse("ctrl-v")?;
-    dispatch(
-        window,
-        PlatformInput::KeyDown(gpui::KeyDownEvent {
-            keystroke: paste,
-            is_held: false,
-            prefer_character_input: false,
-        }),
-        cx,
-    )?;
-    pause(cx, 150).await;
-    anyhow::ensure!(
-        eval(&page, "document.getElementById('browser-input').value", cx).await?
-            == "hello linux — café 日本語",
-        "Unicode clipboard paste failed: {:?}",
-        eval(&page, "document.getElementById('browser-input').value", cx).await?
-    );
-    eval(
-        &page,
-        "document.getElementById('browser-input').select();true",
-        cx,
-    )
-    .await?;
-    dispatch(
-        window,
-        PlatformInput::KeyDown(gpui::KeyDownEvent {
-            keystroke: gpui::Keystroke::parse("ctrl-c")?,
-            is_held: false,
-            prefer_character_input: false,
-        }),
-        cx,
-    )?;
-    pause(cx, 150).await;
-    anyhow::ensure!(
-        cx.update(|cx| cx.read_from_clipboard().and_then(|v| v.text()))
-            .as_deref()
-            == Some("hello linux — café 日本語"),
-        "browser copy did not reach app clipboard"
-    );
+    // Compositors give an unfocused window no clipboard: local runs on a hidden
+    // workspace (`ZERON_BROWSER_FIXTURE_UNFOCUSED`) type that text instead.
+    let clipboard = std::env::var_os("ZERON_BROWSER_FIXTURE_UNFOCUSED").is_none();
+    if clipboard {
+        cx.update(|cx| cx.write_to_clipboard(gpui::ClipboardItem::new_string(" — café 日本語".into())));
+        pause(cx, 200).await;
+        let paste = gpui::Keystroke::parse("ctrl-v")?;
+        dispatch(
+            window,
+            PlatformInput::KeyDown(gpui::KeyDownEvent {
+                keystroke: paste,
+                is_held: false,
+                prefer_character_input: false,
+            }),
+            cx,
+        )?;
+        pause(cx, 150).await;
+        anyhow::ensure!(
+            eval(&page, "document.getElementById('browser-input').value", cx).await?
+                == "hello linux — café 日本語",
+            "Unicode clipboard paste failed: {:?}",
+            eval(&page, "document.getElementById('browser-input').value", cx).await?
+        );
+        eval(
+            &page,
+            "document.getElementById('browser-input').select();true",
+            cx,
+        )
+        .await?;
+        dispatch(
+            window,
+            PlatformInput::KeyDown(gpui::KeyDownEvent {
+                keystroke: gpui::Keystroke::parse("ctrl-c")?,
+                is_held: false,
+                prefer_character_input: false,
+            }),
+            cx,
+        )?;
+        pause(cx, 150).await;
+        anyhow::ensure!(
+            cx.update(|cx| cx.read_from_clipboard().and_then(|v| v.text()))
+                .as_deref()
+                == Some("hello linux — café 日本語"),
+            "browser copy did not reach app clipboard"
+        );
+    } else {
+        eval(&page, "(()=>{let e=document.getElementById('browser-input');e.value+=' — café 日本語';return true})()", cx).await?;
+    }
     eval(&page,"(()=>{let e=document.getElementById('browser-input');e.setSelectionRange(e.value.length,e.value.length);return true})()",cx).await?;
     window.update(cx, |_, w, cx| {
         page.update(cx, |b, cx| {
@@ -413,7 +542,8 @@ pub async fn exercise(
     pause(cx, 250).await;
     anyhow::ensure!(
         eval(&page, "scrollY", cx).await?.as_f64().unwrap() > 50.,
-        "scroll did not reach page"
+        "scroll did not reach page: {}",
+        eval(&page, "JSON.stringify({y: scrollY, height: document.scrollingElement.scrollHeight, viewport: innerHeight, frames: window.browserFrames})", cx).await?
     );
     eval(&page, "scrollTo(0,0);true", cx).await?;
     pause(cx, 200).await;
@@ -508,6 +638,16 @@ pub async fn exercise(
         page.read_with(cx, |b, _| b.fixture_native_visible()),
         "reopened sidebar lost browser"
     );
+    // The animating page renders again as soon as it is shown, before anything
+    // else wakes it.
+    let frames = page.read_with(cx, |b, _| b.fixture_linux_frames());
+    if !frames.is_null() {
+        let since = frames["vblankMs"].as_f64();
+        anyhow::ensure!(
+            since.is_some_and(|ms| ms < 100.),
+            "a page shown again gets no vblanks (last {since:?} ms ago)"
+        );
+    }
     cx.update(|cx| appearance::set_surface(zeron_theme::SurfacePreference::Frosted, cx));
     capture_frame(window, output, "browser-blur-baseline-dark", cx).await?;
     window.update(cx, |s, _, cx| s.fixture_browser_menu(true, cx))?;
@@ -576,10 +716,25 @@ pub async fn exercise(
         .as_u64()
         .unwrap();
     anyhow::ensure!(frames > 60, "page stopped rendering during interaction");
+    // An animating page at rest renders once per display frame: WPE at the
+    // display's rate, WebKitGTK, the fallback, at up to 60 Hz.
+    let (frame_rate, display_rate) =
+        frame_rates(window, &page, "window.browserFrames", 2000, cx).await?;
+    let path = page.read_with(cx, |b, _| b.fixture_linux_frames());
+    let expected = if path.is_null() { display_rate.min(60.) } else { display_rate };
+    anyhow::ensure!(
+        frame_rate > expected * 0.9,
+        "the page renders {frame_rate:.1} frames/s on a display showing {display_rate:.1}"
+    );
+    // WebKit keeps about four buffers per page; more means its frames outpace
+    // the display.
+    if let Some(shared) = path["shared"].as_u64() {
+        anyhow::ensure!(shared <= 6, "WebKit keeps {shared} buffers for one page");
+    }
     std::fs::write(
         output.join("linux-results.json"),
         serde_json::to_vec_pretty(
-            &serde_json::json!({"keyboard":true,"unicodeClipboard":true,"imeComposition":true,"buttonAndScroll":true,"menuClickIsolation":true,"hoverVisibility":true,"resizeWidths":widths,"cssViewport":width,"liveFrames":frames,"sidebarTransitions":true}),
+            &serde_json::json!({"keyboard":true,"unicodeClipboard":clipboard,"imeComposition":true,"buttonAndScroll":true,"menuClickIsolation":true,"hoverVisibility":true,"resizeWidths":widths,"cssViewport":width,"liveFrames":frames,"frameRate":frame_rate,"displayRate":display_rate,"frames":path,"sidebarTransitions":true}),
         )?,
     )?;
     Ok(())

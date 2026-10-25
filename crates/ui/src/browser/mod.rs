@@ -201,8 +201,8 @@ pub struct BrowserSurface {
     favicon_task: Option<gpui::Task<()>>,
     #[cfg(any(target_os = "macos", windows))]
     favicon_generation: u64,
-    /// The page's pointer cursor (Windows: GPUI owns the cursor).
-    #[cfg(windows)]
+    /// The page's pointer cursor (Windows and Linux: GPUI owns the cursor).
+    #[cfg(any(windows, target_os = "linux"))]
     page_cursor: gpui::CursorStyle,
 }
 
@@ -286,7 +286,7 @@ impl BrowserSurface {
             favicon_task: None,
             #[cfg(any(target_os = "macos", windows))]
             favicon_generation: 0,
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "linux"))]
             page_cursor: gpui::CursorStyle::Arrow,
         }
     }

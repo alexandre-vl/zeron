@@ -37,8 +37,11 @@ fn capture(directory: &std::path::Path, name: &str) -> anyhow::Result<()> {
             .arg(&path)
             .status()?
     };
+    // A nested Wayland compositor whose only output is this window: `grim`.
     #[cfg(not(target_os = "macos"))]
-    let status = {
+    let status = if let Ok(command) = std::env::var("ZERON_BROWSER_CAPTURE_COMMAND") {
+        std::process::Command::new(command).arg(&path).status()?
+    } else {
         let capture_window = std::env::var("ZERON_BROWSER_CAPTURE_WINDOW").ok();
         let windows = std::process::Command::new("xdotool")
             .args([
@@ -222,6 +225,7 @@ fn main() -> anyhow::Result<()> {
             window_bounds: Some(WindowBounds::Windowed(Bounds::new(gpui::point(px(12.),px(30.)), size(px(1000.),px(680.))))),
             titlebar: Some(gpui::TitlebarOptions { title: None, appears_transparent: true, traffic_light_position: Some(gpui::point(px(14.),px(14.))) }),
             app_owns_titlebar_drag: true,
+            app_id: Some("zeron-browser-fixture".into()),
             ..Default::default()
         }, |_, cx| cx.new(|cx| shell::Shell::new(state.clone(), boot, cx))).unwrap();
         state.update(cx, |_, cx| cx.notify());
@@ -258,6 +262,10 @@ fn main() -> anyhow::Result<()> {
                         pause(cx, 50).await;
                     }
                     pause(cx, 500).await;
+                    #[cfg(target_os = "linux")]
+                    if let Some(seconds) = std::env::var("ZERON_BROWSER_BENCH").ok().and_then(|s| s.parse().ok()) {
+                        return linux::bench(window, first.clone(), &output, seconds, cx).await;
+                    }
                     capture_frame(window, &output, "browser-preview-dark", cx).await?;
                     // Real DOM click, native navigation and history.
                     first.read_with(cx, |b, _| b.fixture_eval("document.getElementById('details').click()"));
