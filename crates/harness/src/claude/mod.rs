@@ -45,6 +45,7 @@
 
 pub mod catalog;
 mod discovery;
+mod fork_tail;
 mod normalize;
 pub mod refresh_lock;
 mod wire;
@@ -69,6 +70,7 @@ use crate::process::owned::Child;
 use crate::process::{ChildStdin, Command, Stdio};
 use crate::{Harness, HarnessError, RunControls, Signal, send_signal};
 use catalog::{apply_ultrathink, to_effort};
+use fork_tail::ForkTail;
 use normalize::{Normalizer, Transcript};
 use wire::{ControlRequestFrame, Frame, allow_response, control_error_line, control_response_line};
 
@@ -1154,6 +1156,9 @@ async fn run_session(session: Session) {
     // [`crate::shutdown_agent`]).
     #[cfg_attr(not(unix), allow(unused_mut))]
     let mut torn_down: Vec<crate::process::Tracked> = Vec::new();
+    // The typed fork whose transcript is read off disk (see [`fork_tail`]).
+    let claude_root = config_root(&launched.env);
+    let mut tail: Option<ForkTail> = None;
 
     'main: loop {
         if std::mem::take(&mut relaunch) {
@@ -1196,6 +1201,14 @@ async fn run_session(session: Session) {
             }
         }
         let control_deadline = pending_controls.values().map(|(_, _, at)| *at).min();
+        match norm.fork_to_follow() {
+            Some(fork) if tail.as_ref().is_none_or(|t| t.chip != fork.0) => {
+                tail = Some(ForkTail::new(&claude_root, fork));
+            }
+            Some(_) => {}
+            None => tail = None,
+        }
+        let tail_at = tail.as_ref().and_then(ForkTail::next_read);
         tokio::select! {
             line = stdout_lines.next_line() => match line {
                 Ok(Some(line)) => {
@@ -1419,6 +1432,17 @@ async fn run_session(session: Session) {
                 Err(e) => {
                     let _ = event_tx.send(Err(HarnessError::Io(e))).await;
                     break 'main;
+                }
+            },
+
+            // The typed fork's records, as it writes them.
+            _ = tokio::time::sleep_until(tail_at.unwrap_or_else(tokio::time::Instant::now)),
+                if tail_at.is_some() => {
+                let records = tail.as_mut().map_or_else(Vec::new, ForkTail::read);
+                for ev in records.into_iter().flat_map(|record| norm.fork_record(record)) {
+                    if event_tx.send(Ok(ev)).await.is_err() {
+                        break 'main;
+                    }
                 }
             },
 
