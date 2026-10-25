@@ -176,6 +176,7 @@ function frame(t){if(start===null)start=t;let max=document.documentElement.scrol
 window.scrollTo(0,((t-start)*0.6)%max);window.benchFrames++;requestAnimationFrame(frame)}requestAnimationFrame(frame);true";
 
 /// WebGL 2 clearing the whole viewport and drawing a turning triangle.
+/// `benchInfo()` also clears a WebGL 1 context and reads a pixel back.
 const BENCH_WEBGL: &str = "document.body.innerHTML='';document.body.style.margin='0';\
 let c=document.createElement('canvas');c.style='position:fixed;inset:0;width:100vw;height:100vh';document.body.append(c);\
 let gl=c.getContext('webgl2');window.benchFrames=0;window.benchError=gl?null:'no WebGL 2 context';\
@@ -189,7 +190,11 @@ let v=gl.getAttribLocation(p,'v');gl.enableVertexAttribArray(v);gl.vertexAttribP
 let u=gl.getUniformLocation(p,'t');\
 function frame(t){let w=innerWidth*devicePixelRatio,h=innerHeight*devicePixelRatio;if(c.width!==w||c.height!==h){c.width=w;c.height=h}\
 gl.viewport(0,0,w,h);gl.clearColor(0.06,0.13,0.1,1);gl.clear(gl.COLOR_BUFFER_BIT);gl.uniform1f(u,t/500);gl.drawArrays(gl.TRIANGLES,0,3);\
-window.benchFrames++;requestAnimationFrame(frame)}requestAnimationFrame(frame)}true";
+window.benchFrames++;requestAnimationFrame(frame)}requestAnimationFrame(frame)}\
+window.benchInfo=()=>{let one=document.createElement('canvas').getContext('webgl'),pixel=null;\
+if(one){one.clearColor(0.25,0.5,0.75,1);one.clear(one.COLOR_BUFFER_BIT);let b=new Uint8Array(4);\
+one.readPixels(0,0,1,1,one.RGBA,one.UNSIGNED_BYTE,b);pixel=Array.from(b)}\
+return {webgl2:!!gl,webgl1Pixel:pixel}};true";
 
 /// A 60 fps video filling the viewport, played from a blob of the fixture's
 /// `/bench.mp4`; its frames counted as the page composites them.
