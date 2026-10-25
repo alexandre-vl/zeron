@@ -436,6 +436,17 @@ impl PullRequestDestination {
         }
     }
 
+    /// The value written to the legacy `pullRequestDestination` key. Builds
+    /// up to v0.2.122 read only that key and reset every UI setting on a
+    /// name they don't know, so it never holds `browser`: an in-app browser
+    /// pick reads there as the view, the closest destination they have.
+    const fn legacy_key(self) -> &'static str {
+        match self {
+            Self::External => "external",
+            Self::Native | Self::Browser => "native",
+        }
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::Native => "Pull request view",
@@ -1202,6 +1213,9 @@ pub struct UiSettings {
     pub transcript_compact_mode: bool,
     /// Destination shared by PR badges, the pull-request board, and pull
     /// request links in messages while [`Self::open_web_links_in_zeron`] is on.
+    /// Stored as `pullRequestOpenIn`; [`Self::save`] also writes the legacy
+    /// `pullRequestDestination` for older builds sharing this file.
+    #[serde(rename = "pullRequestOpenIn")]
     pub pull_request_destination: PullRequestDestination,
     /// Last explicitly selected PR scope, restored when no project is selected.
     pub last_pull_request_repository: Option<String>,
@@ -2079,6 +2093,11 @@ impl UiSettings {
                         if let Some(legacy) = settings.remove("filesEditorFontSize") {
                             settings.entry("codeFontSize").or_insert(legacy);
                         }
+                        // A file an older build wrote last holds only the
+                        // legacy destination key (see `save`).
+                        if let Some(legacy) = settings.remove("pullRequestDestination") {
+                            settings.entry("pullRequestOpenIn").or_insert(legacy);
+                        }
                     }
                     if let Some(keymap) = value
                         .get_mut("keymap")
@@ -2180,8 +2199,20 @@ impl UiSettings {
         std::fs::create_dir_all(data_dir)?;
         let path = Self::path(data_dir);
         let tmp = path.with_extension("json.tmp");
-        let json = serde_json::to_string_pretty(self)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        // Flattened, not through `serde_json::Value`, which would widen
+        // every `f32` (`1.8` → `1.7999999523162842`).
+        #[derive(Serialize)]
+        struct Saved<'a> {
+            #[serde(flatten)]
+            settings: &'a UiSettings,
+            #[serde(rename = "pullRequestDestination")]
+            legacy_pull_request_destination: &'static str,
+        }
+        let json = serde_json::to_string_pretty(&Saved {
+            settings: self,
+            legacy_pull_request_destination: self.pull_request_destination.legacy_key(),
+        })
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         std::fs::write(&tmp, json)?;
         std::fs::rename(&tmp, &path)
     }
@@ -2288,6 +2319,61 @@ mod tests {
         assert!(!loaded.compact_model_picker);
     }
 
+    /// Every build shares `ui-settings.json`, and up to v0.2.122 an unknown
+    /// `pullRequestDestination` reset every UI setting. A saved file keeps
+    /// that key to the names those builds know, and the full pick survives.
+    #[test]
+    fn saved_pull_request_destination_stays_readable_by_older_builds() {
+        // `PullRequestDestination` and the fields read here, as v0.2.122
+        // derives them.
+        #[derive(Debug, PartialEq, Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        enum OldDestination {
+            Native,
+            External,
+        }
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct OldBuild {
+            pull_request_destination: OldDestination,
+            sidebar_width: f32,
+        }
+        let dir = tempfile::tempdir().unwrap();
+        for (destination, old) in [
+            (PullRequestDestination::Native, OldDestination::Native),
+            (PullRequestDestination::Browser, OldDestination::Native),
+            (PullRequestDestination::External, OldDestination::External),
+        ] {
+            let settings = UiSettings {
+                pull_request_destination: destination,
+                sidebar_width: 300.0,
+                ..UiSettings::default()
+            };
+            settings.save(dir.path()).unwrap();
+            let text = std::fs::read_to_string(UiSettings::path(dir.path())).unwrap();
+            let read: OldBuild = serde_json::from_str(&text).unwrap();
+            assert_eq!(read.pull_request_destination, old, "{destination:?}");
+            assert_eq!(read.sidebar_width, 300.0);
+            assert_eq!(
+                UiSettings::load(dir.path()).pull_request_destination,
+                destination
+            );
+        }
+        // A file an older build wrote last: its legacy key is the pick.
+        let write = |text: &str| std::fs::write(UiSettings::path(dir.path()), text).unwrap();
+        write(r#"{"pullRequestDestination":"external"}"#);
+        assert_eq!(
+            UiSettings::load(dir.path()).pull_request_destination,
+            PullRequestDestination::External
+        );
+        // Both keys: the full pick wins over its legacy stand-in.
+        write(r#"{"pullRequestDestination":"native","pullRequestOpenIn":"browser"}"#);
+        assert_eq!(
+            UiSettings::load(dir.path()).pull_request_destination,
+            PullRequestDestination::Browser
+        );
+    }
+
     #[test]
     fn pull_request_destination_defaults_to_the_native_view_and_round_trips() {
         let existing: UiSettings = serde_json::from_str(r#"{"sidebarWidth":300}"#).unwrap();
@@ -2305,7 +2391,7 @@ mod tests {
             };
             let text = serde_json::to_string(&settings).unwrap();
             assert!(
-                text.contains(&format!(r#""pullRequestDestination":"{stored}""#)),
+                text.contains(&format!(r#""pullRequestOpenIn":"{stored}""#)),
                 "{text}"
             );
             let loaded: UiSettings = serde_json::from_str(&text).unwrap();
