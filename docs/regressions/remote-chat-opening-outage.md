@@ -213,6 +213,27 @@ The review's findings and what was done:
 | Unacknowledged pushes on a live room no longer shown | Kept: the old pill flashed "Syncing…" on every slow ACK; the composer owns the per-chat story |
 | A stale `Local` frame shows a warm, empty chat blank for about a second | Kept: a room retires only once caught up |
 
+A later review found one line the engine fix now relies on that no test
+covered: `ChatPersistence::new` opens a row whose cursor is not verified at
+cursor 0 (`crates/engine/src/chat_persistence.rs:49`). Before, the repair
+backed it up at every rejoin. Now a landed write ends the repair, so a stored
+cursor above the doc's rows would never be fetched again.
+`an_unverified_cursor_opens_at_zero` pins it. With the zeroing removed it
+fails, and every other test passes:
+
+```text
+chat_persistence::tests::an_unverified_cursor_opens_at_zero ... FAILED
+  left: 500
+ right: 0
+```
+
+For a doc opened from an unverified row, the repair still runs at a rejoin
+until a write lands, so that rejoin downloads from the checkpoint again:
+within about a second of the doc's first rows (longer while the shared writer
+saves another chat), and for as long as writes fail. From the code, the host's
+first join after its own pushes can do the same, when the room's state arrives
+before the acked cursor is saved. Each costs a download, never data.
+
 ## Reproduce
 
 ```sh
@@ -230,10 +251,11 @@ entry and its four hooks (`Shell::fixture_open_chat`,
 `Composer::fixture_draft`, each one call into the production path) were
 applied unchanged to `c04e3749`.
 
-Validation, after rebasing onto `c04e3749`: 634 engine tests pass (5
-ignored) and 1,897 UI tests pass; 4 and 22 of them are new. The mutation runs
-and the real-edge run above were made on `1ec71a31`; the rebase changed
-nothing in `crates/sync`, the chat host or its persistence. The two relay
+Validation, after rebasing onto `c04e3749`: 635 engine tests pass (5
+ignored) and 1,897 UI tests pass; 5 and 22 of them are new. The mutation runs
+and the real-edge run above were made on `1ec71a31`, except the zeroing's,
+made after the rebase; the rebase changed nothing in `crates/sync`, the chat
+host or its persistence. The two relay
 tests passed five consecutive runs. Changed hunks pass rustfmt; `git diff
 --check` passes.
 
