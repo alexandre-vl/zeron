@@ -125,10 +125,10 @@ connection must ask for rows after 5. `slow_hello_reads_as_connecting_until_the_
 holds HELLO past the 4 s grace and checks the chat reports `Connecting`, not
 `Offline`, until the room answers, then `Synced`.
 
-The UI tests were checked by mutation: each production rule was reverted
-alone and the build rerun. The stall-without-deadline mutation (`Stalled` as
-soon as the room is down) failed 4 tests. Six more mutations together failed
-7 tests:
+The UI tests were checked by mutation: production rules were reverted and
+the build rerun. The stall-without-deadline mutation (`Stalled` as soon as the
+room is down), reverted alone, failed 4 tests. Six more, reverted together,
+failed 7 tests, each on its own rule's assertion:
 
 ```text
 mutation                                  failing assertion
@@ -180,7 +180,10 @@ the loader lies inside its pane: Bounds { origin: Point { x: 371px, y: 600px }, 
   in Bounds { origin: Point { x: 0px, y: 0px }, size: Size { 800px × 600px } }
 ```
 
-Every fix below was checked the same way, each reverted alone (two builds):
+Every fix below was checked the same way. The loader layout and six of the UI
+rules were reverted together in one build, "waiting for a slot never dials"
+alone in a second, and the engine rule in an engine build. Each test failed on
+its own rule's assertion:
 
 ```text
 reverted rule                              failing test, assertion
