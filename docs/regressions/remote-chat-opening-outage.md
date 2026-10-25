@@ -1,0 +1,216 @@
+# Remote chat opening reads as an outage
+
+Base: `1ec71a31` (main, v0.2.120). Verified on macOS with unit, gpui and
+in-process relay tests, and against a local `wrangler dev` edge with two
+headless engines. The reporting desktop and its host were not exercised, so
+this is not a claim about the installed application.
+
+Opening a chat hosted on another device over a slow edge showed a blank
+transcript with no indicator, then "Reconnecting — messages will send once the
+connection recovers." although nothing had been sent. Revisits repeated both
+with no loading cue. The desktop log for the reported chat shows its first
+STATE frame 12.7 s after admission on the cold open and 8.7 s on a revisit,
+and the revisit replaying rows from the checkpoint (`repair from=1741 to=5`).
+
+Ten defects were found:
+
+- C1: four seconds after opening, a chat whose room had not answered yet read
+  as an outage (`!net.connected` under a connected registry), although the
+  engine allows 20 s to connect and 15 s for HELLO.
+- C2: the "messages will send" clause showed with no draft, queued message or
+  pending send.
+- C3: the sidebar pill described the selected chat's sync ("Syncing…", "Sync
+  queued — changes are saved") while the composer described an outage.
+- C4: a never-synced remote chat resets to an authoritative empty transcript,
+  which renders as a blank page.
+- C5: navigation ends the watch and the room retires after 10 s idle, so every
+  revisit is a cold rejoin, with no visible cue.
+- C6: legacy cursor repair ran on every rejoin of a chat first opened cold.
+  Its born snapshot is unverified and the verified flag was read once per
+  handle, so each rejoin rewound to the checkpoint and downloaded the rows
+  again. Other chats in the same log show the same pattern.
+- C7: host presence and the edge link shared one outage message. In the
+  incident the host was up; this desktop's registry socket had gone deaf
+  (`all live peer presence went dark; probing registry room (deaf-socket
+  tripwire)`).
+- C8: under a connected registry `delivery_live` was ignored, so a chat
+  delivering over HTTP fallback read as degraded.
+- C9: side chats share `Transcript` and `Composer`, so they inherited C1–C5.
+- C10: forking closed its card before the request, showed nothing for up to
+  the 30 s relay deadline, reported errors in the main composer, and opened
+  nothing when the parent was not listed.
+
+## Fix
+
+- Engine (C6): `ChatPersistence` holds the verified flag as an `AtomicBool`,
+  seeded from the store and set by the first verified write.
+  `EngineChatSink::cursor_is_verified` reads it, so repair runs once per legacy
+  snapshot and never once per rejoin. The thin client already reads the flag
+  from the store.
+- Link state (C1, C7, C8): `AppState::chat_link_at` returns
+  `ChatLink { sync, host_unreachable }`. An unsynced remote chat is `Syncing`,
+  captioned after 4 s, and becomes `Stalled` only once its room dial has stayed
+  down for 35 s (the engine's 20 s connect plus 15 s hello budget). The clocks
+  are the view's own: opening a chat restarts its caption hold, waiting for a
+  sync slot never stalls, and a new engine's first frame restarts them all.
+  Both moments are clock transitions for the open chat and for chats with a
+  pending send. `delivery_live` counts as live unless the engine is offline.
+  Host presence is a separate flag, and a sleeping Cloud machine never sets it.
+- Sends: "Queued" uses `send_would_queue`; a syncing chat does not queue. Past
+  the 120 s grace, a send on a chat still syncing is not "Not delivered": its
+  pushes leave before catch-up (`crates/sync/src/chat_client.rs`, "Pending
+  pushes ALSO go before catch-up completes") and its adoption shows once the
+  copy catches up.
+- Composer (C2, C5): `link_notice` adds the "will send" clause only with a
+  draft, queued message or pending send. Without one it says "Syncing…",
+  "Reconnecting…" or "Offline", and nothing while the transcript loader shows.
+  "Can't reach {host}" appears only on the send path.
+- Sidebar pill (C3): global connectivity only, plus a storage error from any
+  chat.
+- Transcript (C4, C5): `AppState::transcript_loading` returns `Opening`,
+  `Syncing`, `Reconnecting` or `Offline` for a blank remote transcript that has
+  not caught up. The loader (the house `ring_spinner` and a caption) appears
+  after a 300 ms timer, which reduced motion does not skip. A still wrapper
+  positions it: `motion::fade_in` restyles its element `relative` every frame,
+  which would lay the overlay out below the full-height list, where the pane
+  clips it. A cached revisit never shows it, nor does a subagent tab, an
+  unsaved side chat, a chat hosted here or a local profile.
+- Side chats (C9, C10): they get the composer and transcript fixes, each
+  reading its tab's own `AppState`. A fork opens its tab immediately with
+  "Forking on {host}…"; failure shows the error and Retry in that tab. Each
+  fork tracks its own request, so a retry never waits on another fork. The
+  host writes the fork's row before it answers, and the answer can time out
+  after the fork exists: opening the row turns the waiting tab into the chat.
+  A tab closed while forking stays closed, and the fork lists under its parent.
+
+## Before/after proof
+
+The engine tests were run with the line that sets the flag on a verified write
+removed, which restores the base behaviour (the flag read once per handle
+open). Both failed:
+
+```text
+chat_persistence::tests::first_verified_write_ends_legacy_cursor_repair ... FAILED
+doc_host::sync_lifecycle_tests::rejoin_after_idle_retirement_resumes_from_its_cursor ... FAILED
+assertion `left == right` failed: rejoin rewound to the checkpoint
+  left: Some(2)
+ right: Some(5)
+```
+
+`rejoin_after_idle_retirement_resumes_from_its_cursor` runs the real host
+against an in-process relay that serves a 5-row log with its checkpoint at
+row 2. It opens the chat cold, lets it retire idle and reopens it; the second
+connection must ask for rows after 5. `slow_hello_reads_as_connecting_until_the_room_answers`
+holds HELLO past the 4 s grace and checks the chat reports `Connecting`, not
+`Offline`, until the room answers, then `Synced`.
+
+The UI tests were checked by mutation: each production rule was reverted
+alone and the build rerun. The stall-without-deadline mutation (`Stalled` as
+soon as the room is down) failed 4 tests. Six more mutations together failed
+7 tests:
+
+```text
+mutation                                  failing assertion
+"will send" clause without intent         left: Some("Reconnecting — messages will send once the connection recovers.")
+                                          right: Some("Reconnecting…")
+loader delay 0 ms                         left: Some(Opening) right: None
+fork completion ignores a closed tab      assertion failed: shell.side_chats.is_empty()
+storage error needs every chat            left: Some(("Offline — sends are saved", true))
+                                          right: Some(("Changes could not be saved", true))
+host flag from "online", not "warns"      left: ChatLink { sync: Live, host_unreachable: true }
+                                          right: ChatLink { sync: Live, host_unreachable: false }
+syncing deadlines removed                 the caption shows on time  left: 0 right: 1
+```
+
+With the rules restored, all pass.
+
+## End to end on a real edge
+
+The two-device harness (`scripts/e2e-smoke.sh`: `wrangler dev` in dev-auth
+mode and two headless engines) ran with one more step: once the driver's
+watch on device B ended, B's room for the chat retired idle; 30 s later a
+client reopened the chat on B and held it for 20 s. B's log then shows the
+chat admitted twice. With the line that certifies the cursor removed, the
+rejoin rewinds as in the incident:
+
+```text
+cursor repairs on B: 1
+INFO zeron_sync::chat_client: chat2: one-time legacy cursor repair from=1 to=0
+```
+
+With the fix, in two runs, the smoke passes and the rejoin repairs nothing
+(`cursor repairs on B: 0`). The extra step was a scratch script and example
+outside the repository; the harness itself is unchanged. A shell started from
+inside Zeron inherits its `ZERON_*` environment, and `ZERON_WORKOS_CLIENT_ID`
+alone turns the harness's dev-mode engines into local profiles that never
+sync, so the run cleared the environment (`env -i`).
+
+## Counter-review
+
+An independent review of the diff found the transcript loader never visible:
+`fade_in` overrode its absolute positioning, so the overlay sat below the list
+where the pane clipped it, while the composer hid its own caption for it. The
+loader tests had read only its state; `transcript_loader_renders_centered_in_its_pane`
+now measures where it renders. With the old layout restored it fails exactly
+as reported:
+
+```text
+the loader lies inside its pane: Bounds { origin: Point { x: 371px, y: 600px }, size: Size { 58px × 47.5px } }
+  in Bounds { origin: Point { x: 0px, y: 0px }, size: Size { 800px × 600px } }
+```
+
+Every fix below was checked the same way, each reverted alone (two builds):
+
+```text
+reverted rule                              failing test, assertion
+first frame restarts sync clocks           a_new_engine_restarts_sync_clocks: left: Stalled right: Syncing { shown: true }
+opening restarts the caption hold          waiting_for_a_sync_slot_never_reads_as_an_outage: left: Syncing { shown: true } right: Syncing { shown: false }
+waiting for a slot never dials             waiting_for_a_sync_slot_never_reads_as_an_outage: left: Stalled right: Syncing { shown: true }
+syncing is not undelivered                 a_send_on_a_syncing_chat_is_not_undelivered: !s.send_undelivered("c-remote", late)
+deadlines for open chat, pending sends     chat_sync_caption_and_stall_are_clock_transitions: left: 2 right: 0
+retry per tab                              retrying_a_fork_never_waits_on_another: the retry goes out at once
+row finishes a pending fork                opening_a_pending_forks_row_opens_the_chat: the row opens the chat, not the wait
+only a landed write certifies (engine)     failed_write_keeps_legacy_cursor_repair: !persistence.cursor_verified()
+```
+
+The review's findings and what was done:
+
+| Finding | Outcome |
+| --- | --- |
+| Loader laid out below the list, clipped | Fixed; render-bounds test |
+| A send held while syncing also read "Not delivered" | Fixed: not undelivered while syncing |
+| Sync clocks kept across an engine restart | Fixed: the first frame after attach restarts them |
+| A chat that waited for a sync slot read as stalled when opened | Fixed: a stall counts from the dial; opening restarts the caption hold |
+| Opening a pending fork's row showed the wait | Fixed: the row finishes the fork |
+| Retry did nothing while another fork ran | Fixed: per-tab request tracking |
+| Clock notifications for every background syncing chat | Fixed: the open chat and pending sends only |
+| Pending-fork loader repainted the shell at 30 Hz | Fixed: `ring_spinner` repaints its own view |
+| Done chime swallowed while a send is held past 120 s | Kept: the chime agrees with the visible "Sending"; within 120 s it was already swallowed |
+| Unacknowledged pushes on a live room no longer shown | Kept: the old pill flashed "Syncing…" on every slow ACK; the composer owns the per-chat story |
+| A stale `Local` frame shows a warm, empty chat blank for about a second | Kept: a room retires only once caught up |
+
+## Reproduce
+
+```sh
+cargo +1.99.0 test --locked -p zeron-engine --lib
+cargo +1.99.0 test --locked -p zeron-engine --lib -- slow_hello_reads_as_connecting rejoin_after_idle_retirement
+cargo +1.99.0 test --locked -p zeron-ui --lib -- --skip a_queued_file_reads_back_with_its_bytes_and_display_name --skip generated_image_chunk_reader_targets_owner_and_bounds_decode
+cargo +1.99.0 test --locked -p zeron-ui --lib -- --test-threads=1 a_queued_file_reads_back_with_its_bytes_and_display_name generated_image_chunk_reader_targets_owner_and_bounds_decode
+```
+
+Validation: 620 engine tests pass (4 ignored) and 1,883 UI tests pass
+(1,861 before the change). The two relay tests passed five consecutive runs.
+Changed hunks pass rustfmt; `git diff --check` passes.
+
+The two attachment tests run on their own because they predate this change
+and race in parallel: each builds a real macOS platform without the guard
+`typography::native_text_system` takes, and two at once abort the whole run
+(`Text Input Sources or Text Services Manager API is being called in two
+threads concurrently`). Taking that guard in both would let them run with the
+rest.
+
+Not verified: the installed desktop against the reporting host over a slow
+link (the UI was verified by gpui tests, including where the loader renders),
+any added latency on the local edge, and iOS, which keeps the same 4 s grace
+(`crates/client/src/connectivity.rs`). Rooms still retire between visits;
+keeping them open longer is a separate change.
