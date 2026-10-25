@@ -5455,6 +5455,8 @@ mod tests {
         let missing = text(&home.path().join("gone"));
         let home_text = text(home.path());
         let above_home = text(home.path().parent().unwrap());
+        // `/`, or the drive (`C:\`) on Windows, where `/` isn't absolute.
+        let root = text(home.path().ancestors().last().unwrap());
         let data_text = text(&data);
         let scratch_text = text(&scratch_root);
         for (cwd, why) in [
@@ -5469,7 +5471,7 @@ mod tests {
             ),
             (Some(home_text.as_str()), "home folder, above it"),
             (Some(above_home.as_str()), "home folder, above it"),
-            (Some("/"), "home folder, above it"),
+            (Some(root.as_str()), "home folder, above it"),
             (Some(data_text.as_str()), "around Zeron's data"),
             (Some(scratch_text.as_str()), "around Zeron's data"),
             (Some("~/.zeron/scratch/."), "around Zeron's data"),

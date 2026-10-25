@@ -3856,7 +3856,12 @@ async fn chat_images_come_only_from_their_chats_own_folder() {
     for (chat, device, cwd) in [
         ("ours", here.as_str(), folder(ours.path())),
         ("theirs", here.as_str(), folder(theirs.path())),
-        ("root", here.as_str(), Some("/".into())),
+        // `/`, or a drive (`C:\`) on Windows, where `/` isn't absolute.
+        (
+            "root",
+            here.as_str(),
+            folder(dir.path().ancestors().last().unwrap()),
+        ),
         ("data", here.as_str(), folder(dir.path())),
         ("remote", "another-device", folder(ours.path())),
         (
