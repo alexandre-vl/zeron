@@ -5722,7 +5722,7 @@ mod tests {
             tagged("skill-1", call("nested-2", "Agent: bravo")),
             tagged("nested-1", text("sleeping")),
             tagged("nested-2", text("sleeping")),
-            // `/fanout` typed as the prompt forks with no chip at all.
+            // A `forked-command-*` id no chip carries (a typed fork's, after its turn).
             tagged("forked-command-fanout", text("the fork, replayed")),
             text("fanned out"),
         ] {
