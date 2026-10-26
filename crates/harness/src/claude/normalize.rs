@@ -671,6 +671,10 @@ impl Normalizer {
                         .and_then(|command| command.strip_prefix('/'))
                         .filter(|name| !name.is_empty())
                 {
+                    // A turn runs one at most. Should another start before
+                    // the first settled, the first ends here, not run on as
+                    // a chip nothing settles.
+                    let mut out = self.settle_typed_fork(DoneStatus::Interrupted);
                     let chip = format!("forked-command-{name}-{task}");
                     self.agent_tasks.insert(task.to_owned(), chip.clone());
                     self.agent_spawn_tools.insert(chip.clone());
@@ -679,10 +683,10 @@ impl Normalizer {
                         .as_ref()
                         .and_then(Value::as_str)
                         .filter(|p| !p.trim().is_empty());
-                    let mut out = vec![AgentEvent::ToolCall {
+                    out.push(AgentEvent::ToolCall {
                         id: chip.clone(),
                         call: forked_skill_call(serde_json::json!({ "skill": name })),
-                    }];
+                    });
                     out.extend(prompt.map(|text| {
                         tag(
                             &chip,
@@ -2088,6 +2092,28 @@ mod tests {
         );
         let call = feed_one(&mut norm, TYPED_CALL);
         assert_eq!(routed_to(&call, "forked-command-fanout-t2"), 1, "{call:?}");
+    }
+
+    #[test]
+    fn a_second_typed_fork_settles_the_first() {
+        let mut norm = Normalizer::new();
+        feed_one(&mut norm, TYPED_STARTED);
+        // No result between the two starts: the first must not run on.
+        let second = feed_one(
+            &mut norm,
+            &TYPED_STARTED.replace(r#""task_id":"t1""#, r#""task_id":"t2""#),
+        );
+        assert_eq!(
+            second[..2],
+            typed_settled(DoneStatus::Interrupted),
+            "{second:?}"
+        );
+        assert!(
+            matches!(&second[2], AgentEvent::ToolCall { id, .. } if id == "forked-command-fanout-t2"),
+            "{second:?}"
+        );
+        // The first's late notification finds no spawn.
+        assert!(feed_one(&mut norm, TYPED_NOTIFIED).is_empty());
     }
 
     #[test]
