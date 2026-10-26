@@ -697,8 +697,8 @@ impl Host {
             && self
                 .visible_bounds
                 .is_some_and(|b| f32::from(b.size.width) > 0. && f32::from(b.size.height) > 0.);
-        if (!visible || self.presentation == Presentation::Passthrough) && has_focus(&self.view) {
-            let _ = self.web.focus_parent();
+        if !visible || self.presentation == Presentation::Passthrough {
+            self.focus_chrome();
         }
         if self.view.isHidden() == visible {
             #[cfg(feature = "browser-fixture")]
@@ -720,9 +720,7 @@ impl Host {
 
 impl Drop for Host {
     fn drop(&mut self) {
-        if has_focus(&self.view) {
-            let _ = self.web.focus_parent();
-        }
+        self.focus_chrome();
         unsafe {
             if let Some(monitor) = self.monitor.take() {
                 NSEvent::removeMonitor(&monitor);
