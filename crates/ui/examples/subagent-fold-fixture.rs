@@ -230,7 +230,8 @@ fn main() -> anyhow::Result<()> {
                 });
                 pause(cx, 600).await;
                 // Open the compact work fold, as a click on its header would.
-                if let Ok(transcript) = window.update(cx, |shell, _, _| shell.fixture_transcript()) {
+                if let Ok(transcript) = window.update(cx, |shell, _, _| shell.fixture_transcript())
+                {
                     transcript.update(cx, |t, cx| t.fixture_toggle_fold("a1#work", cx));
                 }
                 pause(cx, 600).await;
