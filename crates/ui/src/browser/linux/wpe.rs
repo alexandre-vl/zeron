@@ -129,7 +129,11 @@ impl Reader {
         let n = loop {
             // SAFETY: `message` describes buffers owned by this frame.
             let n = unsafe {
-                libc::recvmsg(self.socket.as_raw_fd(), &mut message, libc::MSG_CMSG_CLOEXEC)
+                libc::recvmsg(
+                    self.socket.as_raw_fd(),
+                    &mut message,
+                    libc::MSG_CMSG_CLOEXEC,
+                )
             };
             if n < 0 && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
                 continue;
@@ -199,7 +203,9 @@ impl Buffer {
             // DRM vendors fill the top byte, so modifiers can exceed i64.
             Kind::Dmabuf => {
                 let value = &info["modifier"];
-                value.as_u64().or_else(|| value.as_i64().map(|v| v as u64))?
+                value
+                    .as_u64()
+                    .or_else(|| value.as_i64().map(|v| v as u64))?
             }
             Kind::Shm => DRM_FORMAT_MOD_LINEAR,
         };
@@ -679,9 +685,10 @@ impl Presenter {
         let damage = (!self.stale && !self.missed).then_some(&frame.damage[..]);
         // The previous frame's buffer goes back to WebKit once the GPU has
         // finished these copies, which run after any still reading it.
-        let previous = self.shown.take().filter(|shown| {
-            shown.buffer.kind == Kind::Dmabuf && shown.id != frame.buffer
-        });
+        let previous = self
+            .shown
+            .take()
+            .filter(|shown| shown.buffer.kind == Kind::Dmabuf && shown.id != frame.buffer);
         let release = previous.map(|previous| {
             let outbox = self.outbox.clone();
             let page = self.page;
@@ -765,8 +772,12 @@ impl Presenter {
             };
             #[cfg(feature = "browser-fixture")]
             if result.is_ok() {
-                let pixels: i64 = regions.iter().map(|r| i64::from(r.size.width.0) * i64::from(r.size.height.0)).sum();
-                self.log.copied(pixels as u64 * 4, buffer.kind == Kind::Dmabuf);
+                let pixels: i64 = regions
+                    .iter()
+                    .map(|r| i64::from(r.size.width.0) * i64::from(r.size.height.0))
+                    .sum();
+                self.log
+                    .copied(pixels as u64 * 4, buffer.kind == Kind::Dmabuf);
             }
             result
         })();
@@ -876,7 +887,10 @@ impl Presenter {
 
 /// A GPUI scroll over a page whose top-left corner is at `origin`, as WPE's
 /// axis event: precise for touchpads, discrete steps for wheels.
-pub(super) fn scroll_command(origin: gpui::Point<gpui::Pixels>, event: &gpui::ScrollWheelEvent) -> Value {
+pub(super) fn scroll_command(
+    origin: gpui::Point<gpui::Pixels>,
+    event: &gpui::ScrollWheelEvent,
+) -> Value {
     let position = event.position - origin;
     let (delta, precise) = match event.delta {
         gpui::ScrollDelta::Pixels(delta) => (point(f32::from(delta.x), f32::from(delta.y)), true),

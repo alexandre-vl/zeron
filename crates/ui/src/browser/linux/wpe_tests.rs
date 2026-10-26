@@ -18,10 +18,15 @@ use std::{
 fn memfd(bytes: &[u8], seal: bool) -> OwnedFd {
     // SAFETY: plain memfd_create/fcntl on descriptors this test owns.
     unsafe {
-        let fd = libc::memfd_create(c"zeron-test".as_ptr(), libc::MFD_CLOEXEC | libc::MFD_ALLOW_SEALING);
+        let fd = libc::memfd_create(
+            c"zeron-test".as_ptr(),
+            libc::MFD_CLOEXEC | libc::MFD_ALLOW_SEALING,
+        );
         assert!(fd >= 0, "memfd_create: {}", io::Error::last_os_error());
         let fd = OwnedFd::from_raw_fd(fd);
-        std::fs::File::from(fd.try_clone().unwrap()).write_all(bytes).unwrap();
+        std::fs::File::from(fd.try_clone().unwrap())
+            .write_all(bytes)
+            .unwrap();
         if seal {
             let seals = libc::F_SEAL_SHRINK | libc::F_SEAL_GROW | libc::F_SEAL_SEAL;
             assert_eq!(libc::fcntl(fd.as_raw_fd(), libc::F_ADD_SEALS, seals), 0);
@@ -64,7 +69,10 @@ fn send_with_fds(socket: &UnixStream, data: &[u8], fds: &[&OwnedFd]) {
                 slots.add(i).write_unaligned(fd.as_raw_fd());
             }
         }
-        assert_eq!(libc::sendmsg(socket.as_raw_fd(), &message, 0), data.len() as isize);
+        assert_eq!(
+            libc::sendmsg(socket.as_raw_fd(), &message, 0),
+            data.len() as isize
+        );
     }
 }
 
@@ -115,12 +123,18 @@ fn reader_pairs_descriptors_with_packets_split_across_reads() {
     rest.extend(packet(b'F', 7, b"{}"));
     send_with_fds(&theirs, &rest, &[]);
     let (kind, page, payload) = reader.next().unwrap();
-    assert_eq!((kind, page, &payload[..]), (b'B', 7, &br#"{"buffer":1}"#[..]));
+    assert_eq!(
+        (kind, page, &payload[..]),
+        (b'B', 7, &br#"{"buffer":1}"#[..])
+    );
     assert_eq!(inode(&reader.take_fd().unwrap()), inode(&shared));
     assert_eq!(reader.next().unwrap().0, b'F');
     assert!(reader.take_fd().is_err(), "a packet without a descriptor");
     drop(theirs);
-    assert_eq!(reader.next().unwrap_err().kind(), io::ErrorKind::UnexpectedEof);
+    assert_eq!(
+        reader.next().unwrap_err().kind(),
+        io::ErrorKind::UnexpectedEof
+    );
 }
 
 #[test]
@@ -140,7 +154,10 @@ fn buffers_are_validated_before_use() {
     assert_eq!(id, 3);
     assert_eq!(buffer.kind, Kind::Dmabuf);
     assert_eq!((buffer.width, buffer.height, buffer.stride), (64, 32, 256));
-    assert!(Buffer::parse(&info(3, "shm", 64, 32, 255), fd()).is_none(), "stride below a row");
+    assert!(
+        Buffer::parse(&info(3, "shm", 64, 32, 255), fd()).is_none(),
+        "stride below a row"
+    );
     assert!(Buffer::parse(&info(3, "shm", 0, 32, 256), fd()).is_none());
     assert!(Buffer::parse(&info(3, "shm", 9000, 32, 36000), fd()).is_none());
     assert!(Buffer::parse(&info(3, "texture", 64, 32, 256), fd()).is_none());
@@ -153,12 +170,21 @@ fn buffers_are_validated_before_use() {
     // A dma-buf says how its pixels are laid out, in all 64 bits.
     let mut tiled = info(3, "dmabuf", 64, 32, 256);
     tiled["modifier"] = 0x0300_0000_0060_6015_u64.into();
-    assert_eq!(Buffer::parse(&tiled, fd()).unwrap().1.modifier, 0x0300_0000_0060_6015);
+    assert_eq!(
+        Buffer::parse(&tiled, fd()).unwrap().1.modifier,
+        0x0300_0000_0060_6015
+    );
     tiled["modifier"] = (-1_i64).into();
     assert_eq!(Buffer::parse(&tiled, fd()).unwrap().1.modifier, u64::MAX);
     tiled.as_object_mut().unwrap().remove("modifier");
     assert!(Buffer::parse(&tiled, fd()).is_none(), "no layout");
-    assert_eq!(Buffer::parse(&info(3, "shm", 64, 32, 256), fd()).unwrap().1.modifier, 0);
+    assert_eq!(
+        Buffer::parse(&info(3, "shm", 64, 32, 256), fd())
+            .unwrap()
+            .1
+            .modifier,
+        0
+    );
 }
 
 #[test]
@@ -170,7 +196,10 @@ fn mirrors_map_only_when_sealed_against_shrinking() {
         "an unsealed mirror could shrink under the mapping"
     );
     assert_eq!(parse(memfd(&pixels, true)).pixels().unwrap(), &pixels[..]);
-    assert!(parse(memfd(&pixels[..300], true)).pixels().is_none(), "shorter than its rows");
+    assert!(
+        parse(memfd(&pixels[..300], true)).pixels().is_none(),
+        "shorter than its rows"
+    );
 }
 
 #[test]
@@ -178,8 +207,9 @@ fn frames_reject_bad_scales_and_clamp_damage() {
     assert!(Frame::parse(&json!({"buffer": 1, "scale": 0.1, "damage": []})).is_none());
     assert!(Frame::parse(&json!({"buffer": -1, "scale": 1, "damage": []})).is_none());
     assert!(Frame::parse(&json!({"buffer": 1, "scale": 1})).is_none());
-    let frame = Frame::parse(&json!({"buffer": 1, "scale": 2, "damage": [[-5, 3, 99999, 2], [1, 2]]}))
-        .unwrap();
+    let frame =
+        Frame::parse(&json!({"buffer": 1, "scale": 2, "damage": [[-5, 3, 99999, 2], [1, 2]]}))
+            .unwrap();
     assert_eq!(
         frame.damage,
         [Bounds::new(
@@ -198,26 +228,43 @@ fn unpainted_frames_merge_damage_and_return_their_buffers() {
         let buffer = Buffer::parse(&info(id, "dmabuf", 64, 64, 256), memfd(&[], true));
         surface.add_buffer(id, buffer.unwrap().1);
     }
-    surface.add_buffer(3, Buffer::parse(&info(3, "shm", 64, 64, 256), memfd(&[], true)).unwrap().1);
+    surface.add_buffer(
+        3,
+        Buffer::parse(&info(3, "shm", 64, 64, 256), memfd(&[], true))
+            .unwrap()
+            .1,
+    );
     surface.push_frame(frame(1, &[[0, 0, 10, 10]]), &outbox, 9);
     assert!(commands(&rx).is_empty());
     surface.push_frame(frame(2, &[[20, 20, 5, 5]]), &outbox, 9);
-    assert_eq!(commands(&rx), [json!({"cmd": "released", "buffer": 1, "id": 9})]);
+    assert_eq!(
+        commands(&rx),
+        [json!({"cmd": "released", "buffer": 1, "id": 9})]
+    );
     let pending = surface.frame.as_ref().unwrap();
     assert_eq!((pending.buffer, pending.damage.len()), (2, 2));
     for i in 0..20 {
         surface.push_frame(frame(2, &[[30 + i, 30, 1, 1]]), &outbox, 9);
     }
-    assert!(commands(&rx).is_empty(), "the pending buffer is not released");
+    assert!(
+        commands(&rx).is_empty(),
+        "the pending buffer is not released"
+    );
     let damage = &surface.frame.as_ref().unwrap().damage;
     assert!(damage.len() <= 16, "{} rects", damage.len());
     for (x, y) in [(0, 0), (9, 9), (24, 24), (49, 30)] {
         let pixel = point(DevicePixels(x), DevicePixels(y));
-        assert!(damage.iter().any(|rect| rect.contains(&pixel)), "lost damage at {x},{y}");
+        assert!(
+            damage.iter().any(|rect| rect.contains(&pixel)),
+            "lost damage at {x},{y}"
+        );
     }
     // Shared-memory mirrors go back to WebKit as soon as they are copied.
     surface.push_frame(frame(3, &[]), &outbox, 9);
-    assert_eq!(commands(&rx), [json!({"cmd": "released", "buffer": 2, "id": 9})]);
+    assert_eq!(
+        commands(&rx),
+        [json!({"cmd": "released", "buffer": 2, "id": 9})]
+    );
     surface.push_frame(frame(1, &[]), &outbox, 9);
     assert!(commands(&rx).is_empty());
     // A buffer Zeron rejected still goes back.
@@ -264,7 +311,10 @@ fn vblank_intervals_tell_webkit_the_refresh_rate() {
     tick(&mut presenter, 60., 150);
     let last = *refresh(&commands(&rx)).last().unwrap();
     // Within the 5% it tolerates before telling WebKit again.
-    assert!(last.abs_diff(60_000) * 10 <= 60_000, "settled at {last} mHz");
+    assert!(
+        last.abs_diff(60_000) * 10 <= 60_000,
+        "settled at {last} mHz"
+    );
     presenter.stop_ticking();
     assert!(!presenter.ticking);
 }
@@ -288,7 +338,10 @@ fn scrolls_undo_gpui_scaling_and_keep_precision() {
     );
     let wheel = gpui::ScrollDelta::Lines(point(0., -3.));
     let command = scroll_command(origin, &event(wheel, gpui::TouchPhase::Moved));
-    assert_eq!((command["dy"].as_f64(), command["precise"].as_bool()), (Some(-1.), Some(false)));
+    assert_eq!(
+        (command["dy"].as_f64(), command["precise"].as_bool()),
+        (Some(-1.), Some(false))
+    );
     let ended = scroll_command(origin, &event(touchpad, gpui::TouchPhase::Ended));
     assert_eq!(ended["stop"], true);
 }
@@ -560,7 +613,9 @@ impl Driver {
         let mut result = None;
         self.until(expression, |driver| {
             let title = driver.route(page).state.lock().unwrap().title.clone();
-            result = title.strip_prefix(&marker).map(|json| serde_json::from_str(json).unwrap());
+            result = title
+                .strip_prefix(&marker)
+                .map(|json| serde_json::from_str(json).unwrap());
             result.is_some()
         });
         result.unwrap()
@@ -613,14 +668,20 @@ impl Driver {
 
     fn key(&self, page: u32, key: &str, mods: u32) {
         for cmd in ["key_down", "key_up"] {
-            self.send(page, json!({"cmd": cmd, "key": key, "text": key, "mods": mods}));
+            self.send(
+                page,
+                json!({"cmd": cmd, "key": key, "text": key, "mods": mods}),
+            );
         }
     }
 
     fn click(&self, page: u32, x: f32, y: f32) {
         self.send(page, json!({"cmd": "move", "x": x, "y": y, "mods": 0}));
         for cmd in ["down", "up"] {
-            self.send(page, json!({"cmd": cmd, "x": x, "y": y, "button": 1, "count": 1, "mods": 0}));
+            self.send(
+                page,
+                json!({"cmd": cmd, "x": x, "y": y, "button": 1, "count": 1, "mods": 0}),
+            );
         }
     }
 }
@@ -633,7 +694,10 @@ fn render_nodes() -> Vec<PathBuf> {
         .flatten()
         .flatten()
         .map(|entry| entry.path())
-        .filter(|path| path.file_name().is_some_and(|name| name.to_string_lossy().starts_with("renderD")))
+        .filter(|path| {
+            path.file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with("renderD"))
+        })
         .collect();
     nodes.sort();
     if let Some(node) = std::env::var_os("ZERON_TEST_RENDER_NODE") {
@@ -668,7 +732,11 @@ fn assert_solid_page(driver: &Driver, page: u32) {
     // 320x200 device pixels at 1.5 lay out at 214x134, rounded up so the
     // page covers GPUI's box: WebKit renders 321x201.
     assert_eq!((buffer.width, buffer.height), (321, 201), "device pixels");
-    assert_eq!(driver.pixel(page, 2, 2), [0, 0, 255, 255], "red background, BGRA");
+    assert_eq!(
+        driver.pixel(page, 2, 2),
+        [0, 0, 255, 255],
+        "red background, BGRA"
+    );
     // The box spans logical 10..30, device 15..45 at scale 1.5.
     assert_eq!(driver.pixel(page, 30, 30), [0, 255, 0, 255], "green box");
     assert_eq!(driver.pixel(page, 46, 46), [0, 0, 255, 255], "box edge");
@@ -716,7 +784,10 @@ fn wpe_renders_pages_on_each_gpu_in_each_layout() {
             rendered.push(format!("{} {modifier:#018x}", node.display()));
         }
     }
-    assert!(!rendered.is_empty(), "no render node produced dma-buf frames");
+    assert!(
+        !rendered.is_empty(),
+        "no render node produced dma-buf frames"
+    );
     eprintln!("dma-buf frames:\n{}", rendered.join("\n"));
 }
 
@@ -749,7 +820,10 @@ fn wpe_animates_at_the_vblank_rate_it_is_given() {
         let after = driver.eval(page, "count()").as_f64().unwrap();
         let raf = (after - before) / elapsed;
         let fps = (driver.frames[&page] - frames) as f64 / elapsed;
-        eprintln!("{hz} Hz vblank: {raf:.1} rAF/s, {fps:.1} frames/s ({:?})", driver.kind(page));
+        eprintln!(
+            "{hz} Hz vblank: {raf:.1} rAF/s, {fps:.1} frames/s ({:?})",
+            driver.kind(page)
+        );
         assert!((raf - hz).abs() < hz * 0.1, "{raf:.1} rAF/s at {hz} Hz");
         assert!((fps - hz).abs() < hz * 0.15, "{fps:.1} frames/s at {hz} Hz");
     }
@@ -758,7 +832,11 @@ fn wpe_animates_at_the_vblank_rate_it_is_given() {
     let before = driver.eval(page, "count()").as_f64().unwrap();
     driver.run(240., Duration::from_millis(300));
     let after = driver.eval(page, "count()").as_f64().unwrap();
-    assert!(after - before <= 1., "{} rAF callbacks without vblanks", after - before);
+    assert!(
+        after - before <= 1.,
+        "{} rAF callbacks without vblanks",
+        after - before
+    );
 }
 
 /// A stand-in for the helper: reports ready, then runs the shell `then`.
@@ -777,7 +855,11 @@ fn a_helper_that_dies_at_startup_fails_at_once() {
     let start = Instant::now();
     let result = spawn_wpe(std::path::Path::new("false"), None, None);
     assert!(matches!(result, Err(Startup::Failed(_))));
-    assert!(start.elapsed() < Duration::from_secs(2), "failed after {:?}", start.elapsed());
+    assert!(
+        start.elapsed() < Duration::from_secs(2),
+        "failed after {:?}",
+        start.elapsed()
+    );
 }
 
 #[test]
@@ -785,7 +867,10 @@ fn a_helper_zeron_cannot_read_is_stopped_and_replaced() {
     let dir = tempfile::tempdir().unwrap();
     // A packet past the protocol's limit, then writes until the socket fills
     // up and blocks the helper.
-    let helper = stub_helper(dir.path(), "printf 'F\\001\\000\\000\\000\\000\\000\\000\\020'\nexec yes");
+    let helper = stub_helper(
+        dir.path(),
+        "printf 'F\\001\\000\\000\\000\\000\\000\\000\\020'\nexec yes",
+    );
     let data = BrowserData {
         engine_override: Some(Engine::Wpe),
         helper_override: Some(helper),
@@ -795,12 +880,18 @@ fn a_helper_zeron_cannot_read_is_stopped_and_replaced() {
     // Zeron hangs up, so the helper exits instead of blocking on its socket.
     let deadline = Instant::now() + Duration::from_secs(5);
     while first.child.lock().unwrap().try_wait().unwrap().is_none() {
-        assert!(Instant::now() < deadline, "the helper outlived its connection");
+        assert!(
+            Instant::now() < deadline,
+            "the helper outlived its connection"
+        );
         std::thread::sleep(Duration::from_millis(10));
     }
     assert!(first.stopped.load(Ordering::Relaxed));
     let second = data.worker(None).unwrap();
-    assert!(!Arc::ptr_eq(&first, &second), "the next page reused the stopped helper");
+    assert!(
+        !Arc::ptr_eq(&first, &second),
+        "the next page reused the stopped helper"
+    );
 }
 
 #[test]
@@ -810,7 +901,10 @@ fn a_helper_busy_being_written_starts_once_released() {
     let dir = tempfile::tempdir().unwrap();
     let helper = dir.path().join("helper");
     std::fs::copy("/bin/true", &helper).unwrap();
-    let writer = std::fs::OpenOptions::new().append(true).open(&helper).unwrap();
+    let writer = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&helper)
+        .unwrap();
     let release = std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(30));
         drop(writer);
@@ -822,7 +916,11 @@ fn a_helper_busy_being_written_starts_once_released() {
 
 /// A WPE page whose WebKit wants vblanks, on a stub helper that takes
 /// commands and never answers.
-fn stub_page() -> (tempfile::TempDir, NativePage, tokio::sync::mpsc::Receiver<NativeEvent>) {
+fn stub_page() -> (
+    tempfile::TempDir,
+    NativePage,
+    tokio::sync::mpsc::Receiver<NativeEvent>,
+) {
     let dir = tempfile::tempdir().unwrap();
     let data = BrowserData {
         engine_override: Some(Engine::Wpe),
@@ -847,7 +945,10 @@ fn a_page_showing_its_error_gets_no_vblanks() {
     assert!(!page.wants_vblank(), "a page showing its error got vblanks");
     fail(&page, None);
     assert!(page.wants_vblank(), "a reloading page got no vblanks");
-    fail(&page, Some("The browser process stopped. Reload to try again."));
+    fail(
+        &page,
+        Some("The browser process stopped. Reload to try again."),
+    );
     assert!(!page.vblank(), "a page showing its error kept its vblanks");
 }
 
@@ -861,7 +962,10 @@ fn a_page_shown_again_restarts_the_vblanks_hiding_stopped() {
     // WebKit still wants vblanks, so it does not ask again: showing the page
     // wakes its surface, which restarts them.
     page.present(Presentation::Live);
-    assert!(events.try_recv().is_ok(), "showing the page did not wake its surface");
+    assert!(
+        events.try_recv().is_ok(),
+        "showing the page did not wake its surface"
+    );
     assert!(page.wants_vblank());
 }
 
@@ -873,11 +977,17 @@ fn wpe_pages_never_outgrow_the_frames_zeron_takes() {
     driver.load(page, "/animated");
     // 8192 device pixels at 1.5 lay out at 5462 logical pixels rounded up,
     // which WebKit would render 8193 pixels wide.
-    driver.send(page, json!({"cmd": "resize", "width": 8192, "height": 64, "scale": 1.5}));
+    driver.send(
+        page,
+        json!({"cmd": "resize", "width": 8192, "height": 64, "scale": 1.5}),
+    );
     driver.run(60., Duration::from_millis(500));
     let frames = driver.frames[&page];
     driver.run(60., Duration::from_millis(500));
-    assert!(driver.frames[&page] > frames + 10, "the page stopped rendering");
+    assert!(
+        driver.frames[&page] > frames + 10,
+        "the page stopped rendering"
+    );
     let width = driver.shown[&page].1.width;
     assert!((8190..=8192).contains(&width), "{width} pixels wide");
 }
@@ -896,12 +1006,25 @@ fn wpe_renders_one_frame_per_vblank_however_often_gpui_paints() {
         driver.run(hz, Duration::from_secs(1));
         let fps = (driver.frames[&page] - frames) as f64 / start.elapsed().as_secs_f64();
         let buffers = driver.route(page).surface.lock().unwrap().buffers.len();
-        let painting = if eager { "as frames arrive" } else { "at vblanks" };
-        eprintln!("{hz} Hz, painting {painting}: {fps:.1} frames/s, {buffers} buffers ({:?})", driver.kind(page));
-        assert!((fps - hz).abs() < hz * 0.15, "{fps:.1} frames/s at {hz} Hz, painting {painting}");
+        let painting = if eager {
+            "as frames arrive"
+        } else {
+            "at vblanks"
+        };
+        eprintln!(
+            "{hz} Hz, painting {painting}: {fps:.1} frames/s, {buffers} buffers ({:?})",
+            driver.kind(page)
+        );
+        assert!(
+            (fps - hz).abs() < hz * 0.15,
+            "{fps:.1} frames/s at {hz} Hz, painting {painting}"
+        );
         // WebKit's swapchain holds four; more, and it renders faster than
         // the display.
-        assert!(buffers <= 5, "{buffers} buffers at {hz} Hz, painting {painting}");
+        assert!(
+            buffers <= 5,
+            "{buffers} buffers at {hz} Hz, painting {painting}"
+        );
     }
 }
 
@@ -918,7 +1041,9 @@ fn wpe_takes_keyboard_pointer_scroll_and_clipboard_input() {
     }
     driver.key(page, "space", 0);
     driver.key(page, "BackSpace", 0);
-    driver.until("typing", |d| d.eval(page, "document.getElementById('i').value") == "hi");
+    driver.until("typing", |d| {
+        d.eval(page, "document.getElementById('i').value") == "hi"
+    });
     // Ctrl+V pastes what Zeron shared; Ctrl+A, Ctrl+C copy back to Zeron.
     driver.send(page, json!({"cmd": "clipboard", "text": " — café 日本語"}));
     driver.key(page, "v", 4);
@@ -947,7 +1072,9 @@ fn wpe_takes_keyboard_pointer_scroll_and_clipboard_input() {
         ..Default::default()
     };
     driver.send(page, scroll_command(point(px(0.), px(0.)), &scroll));
-    driver.until("scroll", |d| d.eval(page, "scrollY").as_f64().unwrap() > 50.);
+    driver.until("scroll", |d| {
+        d.eval(page, "scrollY").as_f64().unwrap() > 50.
+    });
 }
 
 #[test]
@@ -1013,7 +1140,10 @@ fn wpe_resizes_release_the_buffers_they_replace() {
     driver.load(page, "/animated");
     for step in 0..30 {
         let width = 320 + step * 24;
-        driver.send(page, json!({"cmd": "resize", "width": width, "height": 200 + step * 8, "scale": 1.5}));
+        driver.send(
+            page,
+            json!({"cmd": "resize", "width": width, "height": 200 + step * 8, "scale": 1.5}),
+        );
         driver.run(240., Duration::from_millis(20));
     }
     driver.run(240., Duration::from_millis(500));
@@ -1039,7 +1169,10 @@ fn wpe_helper_crash_reaches_every_page() {
     driver.until("the crash to be reported", |d| {
         [first, second].iter().all(|page| {
             let state = d.route(*page).state.lock().unwrap();
-            state.error.as_deref().is_some_and(|error| error.contains("WPE WebKit"))
+            state
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("WPE WebKit"))
         })
     });
 }
