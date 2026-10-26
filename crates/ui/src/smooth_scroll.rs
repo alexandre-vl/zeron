@@ -26,8 +26,9 @@
 //! pointer position with the current modifiers, so the window's input state
 //! never goes stale.
 //!
-//! Left untouched, and each ends a glide in flight: precise input; notches
-//! with Ctrl, Alt, Cmd or Fn held (zoom and other modified gestures stay
+//! Left untouched, and each ends a glide in flight: precise input, and
+//! fractional lines outside macOS (X11 touchpads, high-resolution wheels; see
+//! `notch`); notches with Ctrl, Alt, Cmd or Fn held (zoom and other modified gestures stay
 //! discrete, and pressing one mid-glide drops the rest rather than replaying
 //! it as a zoom); notches over a [`raw_wheel_region`], for content that eases
 //! them itself. A press ends a glide too. Off under reduced motion.
@@ -113,6 +114,15 @@ fn enabled(cx: &App) -> bool {
 /// for one). Shift only picks the axis, and the platform already applied it.
 fn commanded(modifiers: Modifiers) -> bool {
     modifiers.control || modifiers.alt || modifiers.platform || modifiers.function
+}
+
+/// Whether `lines` is a wheel notch. macOS flags trackpads precise, so any
+/// line delta there is a wheel (slow notches from some mice arrive as
+/// fractions). Elsewhere a notch is whole lines (3 a detent, or Windows' lines
+/// setting), while X11 reports touchpads, and X11, Wayland and Windows report
+/// high-resolution wheels, as fractional lines that already stream smoothly.
+fn notch(lines: Point<f32>) -> bool {
+    cfg!(target_os = "macos") || (lines.x.fract() == 0.0 && lines.y.fract() == 0.0)
 }
 
 /// Frame time. Test frames arrive microseconds apart, so tests set the clock.
@@ -415,7 +425,9 @@ fn intercept(
     let lines = match event.delta {
         // Nothing to glide, and nothing to interrupt one in flight.
         ScrollDelta::Lines(lines) if lines == Point::default() => return,
-        ScrollDelta::Lines(lines) if !keep_raw && !commanded(event.modifiers) && enabled(cx) => {
+        ScrollDelta::Lines(lines)
+            if notch(lines) && !keep_raw && !commanded(event.modifiers) && enabled(cx) =>
+        {
             lines
         }
         _ => {
@@ -892,6 +904,13 @@ mod tests {
         for modifiers in [Modifiers::control(), Modifiers::alt(), Modifiers::command()] {
             expect_instant(cx, notch, modifiers);
         }
+        // An X11 touchpad's stream, or a high-resolution wheel's.
+        #[cfg(not(target_os = "macos"))]
+        expect_instant(
+            cx,
+            ScrollDelta::Lines(point(0.0, -0.37)),
+            Modifiers::default(),
+        );
         cx.update(|_, cx| cx.set_reduce_motion(true));
         expect_instant(cx, notch, Modifiers::default());
     }

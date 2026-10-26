@@ -4278,24 +4278,22 @@ impl Transcript {
         });
     }
 
-    /// Input headed for the top breaks the pin as it arrives, however little
-    /// it moved, as use-stick-to-bottom's wheel handler does. The distance
-    /// test in [`Self::handle_scroll`] can't see that on its own: a smoothed
-    /// wheel notch starts and ends with sub-pixel slices, and its slices
+    /// A wheel notch headed for the top breaks the pin as it arrives, however
+    /// little it moved, as use-stick-to-bottom's wheel handler does. The
+    /// distance test in [`Self::handle_scroll`] can't see that on its own: a
+    /// smoothed notch starts and ends with sub-pixel slices, and its slices
     /// arrive on frames, where the spring's step runs before that deferred
     /// decision, pulling the view back and recording the distance it then
-    /// compares against. Children bubble first, so the list has applied the
-    /// input by now, or never saw it.
+    /// compares against. Precise (trackpad) input keeps the distance test.
+    /// Children bubble first, so the list has applied the input by now, or
+    /// never saw it.
     fn on_scroll_wheel(
         &mut self,
         event: &ScrollWheelEvent,
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) {
-        let toward_top = match event.delta {
-            ScrollDelta::Pixels(delta) => delta.y > px(0.0),
-            ScrollDelta::Lines(delta) => delta.y > 0.0,
-        };
+        let toward_top = matches!(event.delta, ScrollDelta::Lines(delta) if delta.y > 0.0);
         self.input_escaped = std::mem::take(&mut self.list_took_input)
             && toward_top
             && self.list.max_offset_for_scrollbar().y > px(0.0);
@@ -11338,6 +11336,20 @@ mod tests {
                 cx,
             );
             assert!(this.pinned, "a wheel the list never saw broke the pin");
+            // Precise input keeps the distance test it always had.
+            this.list_took_input = true;
+            this.on_scroll_wheel(
+                &gpui::ScrollWheelEvent {
+                    delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.0), px(0.5))),
+                    ..Default::default()
+                },
+                window,
+                cx,
+            );
+            assert!(
+                this.pinned && !this.input_escaped,
+                "a trackpad took the escape"
+            );
         });
 
         // One 3-line notch up. Its glide starts and ends with slices well
