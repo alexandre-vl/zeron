@@ -181,16 +181,9 @@ impl Frames {
             started: false,
         }
     }
-}
-impl std::ops::Deref for Frames {
-    type Target = tokio::io::Lines<tokio::io::BufReader<tokio::process::ChildStdout>>;
-    fn deref(&self) -> &Self::Target {
-        &self.lines
-    }
-}
-impl std::ops::DerefMut for Frames {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.lines
+    async fn next_line(&mut self) -> std::io::Result<Option<String>> {
+        use tokio::io::AsyncBufReadExt;
+        self.lines.next_line().await
     }
 }
 /// The next frame, within 5 s. A shim's first frame also waits for `node`
