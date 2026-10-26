@@ -4890,6 +4890,9 @@ impl Pickers {
         tabs = tabs.child(
             div()
                 .id("model-tab-favorites")
+                .role(gpui::Role::Tab)
+                .aria_label("Starred")
+                .aria_selected(favorites_view)
                 .relative()
                 .w(px(32.0))
                 .h(px(32.0))
@@ -4933,6 +4936,9 @@ impl Pickers {
                 tabs.child(
                     div()
                         .id(("harness-tab", ix))
+                        .role(gpui::Role::Tab)
+                        .aria_label(name.clone())
+                        .aria_selected(is_viewed)
                         .relative()
                         .w(px(32.0))
                         .h(px(32.0))
@@ -5379,6 +5385,11 @@ impl Pickers {
                 ));
             }
         }
+        let star_hint = if is_fav {
+            "Remove from favorites"
+        } else {
+            "Add to favorites"
+        };
         el = el.child(
             div()
                 .id(("model-star", ix))
@@ -5391,14 +5402,14 @@ impl Pickers {
                 .justify_center()
                 .cursor_pointer()
                 .hover(|s| s.bg(crate::theme::ink(0.08)))
-                .tooltip(move |_, cx| {
-                    let hint = if is_fav {
-                        "Remove from favorites"
-                    } else {
-                        "Add to favorites"
-                    };
-                    cx.new(|_| compact::PickerHint(hint.into())).into()
+                .role(gpui::Role::Button)
+                .aria_label(star_hint)
+                .aria_toggled(if is_fav {
+                    gpui::Toggled::True
+                } else {
+                    gpui::Toggled::False
                 })
+                .tooltip(move |_, cx| cx.new(|_| compact::PickerHint(star_hint.into())).into())
                 .on_click(cx.listener(move |this, _, _, cx| {
                     cx.stop_propagation();
                     this.toggle_model_favorite(harness, &star_model, cx);

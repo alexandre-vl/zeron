@@ -863,6 +863,8 @@ impl Shell {
                                     this.section_dialog = None;
                                     cx.notify();
                                 }))
+                                .role(gpui::Role::Button)
+                                .aria_label("Close")
                                 .tooltip(crate::settings::widgets::text_tooltip("Close"))
                                 .child(
                                     icon(icons::CLOSE)

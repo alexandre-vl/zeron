@@ -2600,6 +2600,7 @@ impl AppearancePage {
                     .hover(|style| style.bg(theme.surface_raised_hover))
                     .tooltip(widgets::text_tooltip("Close"))
                     .tab_index(0).role(gpui::Role::Button)
+                    .aria_label("Close")
 .focus_visible(|s| s.border_2().border_color(theme.accent).opacity(1.0))
 .on_click(cx.listener(|this, _, _, cx| {
                         this.import_dialog = None;

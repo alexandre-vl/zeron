@@ -588,6 +588,9 @@ impl Shell {
             icon_row = icon_row.child(
                 div()
                     .id(SharedString::from(format!("action-icon-{label}")))
+                    .role(gpui::Role::Button)
+                    .aria_label(label)
+                    .aria_selected(kind == selected_icon)
                     .size(px(34.0))
                     .flex()
                     .items_center()
