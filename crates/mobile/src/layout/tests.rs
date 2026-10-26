@@ -121,6 +121,30 @@ fn streaming_converges_to_full_parse() {
     }
 }
 
+#[test]
+fn agent_messages_show_their_sender_over_the_bubble() {
+    let mut w = worker(390.0);
+    let id = "cd27c5c2-0000-4000-8000-000000000000";
+    let text = zeron_proto::agent_messages::agent_message("Windows lane (cd27c5c2)", id, "Windows lane: done.");
+    w.input = debug_input(vec![DebugEntry { id: "u".into(), user: true, text, streaming: false }], false);
+    let frame = w.pass();
+    let d = frame.display(0).unwrap();
+    assert!(d.text.starts_with("Message from \u{2060} Windows lane"), "{}", d.text);
+    assert!(d.text.contains("Windows lane: done."), "{}", d.text);
+    assert!(!d.text.contains("send_message") && !d.text.contains("cd27c5c2"), "{}", d.text);
+    assert_eq!(frame.message_text(0).as_deref(), Some("Windows lane: done."));
+    // The sender's mark (a chat glyph: the workspace doesn't list it), and
+    // no link to a chat that doesn't open.
+    assert!(d.widgets.iter().any(|w| matches!(&w.kind, display::WidgetKind::Icon { name, .. } if name == "bubble.left")));
+    assert!(d.links.is_empty());
+    // The caption sits over the bubble: its runs end above the bubble's fill.
+    let bubble = d.boxes.iter().find(|b| b.color == display::ColorRole::UserBubble).unwrap();
+    let caption = d.runs.first().unwrap();
+    assert!(caption.baseline < bubble.y, "{caption:?} {bubble:?}");
+    // No wider than the bubble: nothing of it starts left of the bubble.
+    assert!(d.runs.iter().filter(|r| r.baseline < bubble.y).all(|r| r.x >= bubble.x - 0.5), "{:?} {bubble:?}", d.runs);
+}
+
 fn transcript_one(text: &str) -> TranscriptInput {
     debug_input(vec![DebugEntry { id: "a".into(), user: false, text: text.into(), streaming: false }], false)
 }
@@ -446,7 +470,7 @@ fn bench_layout_passes() {
             continuation_of: None,
             duration_ms: None,
         }));
-        w.input = TranscriptInput { entries: e, pending: vec![], working: true, working_since_ms: None, streaming: true };
+        w.input = TranscriptInput { entries: e, pending: vec![], working: true, working_since_ms: None, streaming: true, workspace: None };
         let t = Instant::now();
         w.pass();
         total += t.elapsed();
@@ -588,6 +612,20 @@ fn running_subagent_shows_a_spinner_after_its_spawn_resolves() {
     assert_eq!(spinners(&frame_for(SubagentStatus::Done)), 0, "finished subagent is quiet");
     let failed = frame_for(SubagentStatus::Failed);
     assert!(failed.display(0).unwrap().runs.iter().any(|r| r.color == display::ColorRole::Danger), "failed subagent is tinted danger");
+    // The whole card opens the child's transcript, by its doc.
+    let done = frame_for(SubagentStatus::Done);
+    let display = done.display(0).unwrap();
+    let card = display.widgets.iter().find_map(|w| match &w.kind {
+        display::WidgetKind::Subagent { doc_id, title, running, .. } => Some((doc_id.clone(), title.clone(), *running, w.w)),
+        _ => None,
+    });
+    let (doc, title, running, width) = card.expect("the card is a tap target");
+    assert_eq!(doc.as_deref(), Some("sub-1"));
+    assert_eq!(title, "scan the repo");
+    assert!(!running);
+    assert!(width > 300.0, "it spans the card");
+    // Finished and openable: a chevron where the spinner was.
+    assert!(display.widgets.iter().any(|w| matches!(&w.kind, display::WidgetKind::Icon { name, .. } if name == "chevron.right")));
 }
 
 #[test]
