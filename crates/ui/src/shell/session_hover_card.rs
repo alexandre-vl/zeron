@@ -185,7 +185,7 @@ impl Shell {
         chat_id: &str,
         time_ago: SharedString,
         cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    ) -> AnyElement {
         let view = self.session_card_view.clone();
         view.update(cx, |view, _| {
             view.chat_id = chat_id.to_owned();
@@ -193,29 +193,27 @@ impl Shell {
         });
         let shell = cx.weak_entity();
         let chat_id = chat_id.to_owned();
-        Some(
-            gpui::canvas(
-                move |bounds, window, _| {
-                    window.set_tooltip(gpui::AnyTooltip {
-                        view: view.into(),
-                        // gpui hangs a tooltip 1px below-right of this point.
-                        mouse_position: bounds.origin - gpui::point(px(1.0), px(1.0)),
-                        // A cached sidebar frame replays this request, which
-                        // must not outlive the card.
-                        check_visible_and_update: std::rc::Rc::new(move |_, _, cx| {
-                            shell.upgrade().is_some_and(|shell| {
-                                shell.read(cx).session_hover_card.shown() == Some(chat_id.as_str())
-                            })
-                        }),
-                    });
-                },
-                |_, _, _, _| {},
-            )
-            .absolute()
-            .top_0()
-            .left_full()
-            .into_any_element(),
+        gpui::canvas(
+            move |bounds, window, _| {
+                window.set_tooltip(gpui::AnyTooltip {
+                    view: view.into(),
+                    // gpui hangs a tooltip 1px below-right of this point.
+                    mouse_position: bounds.origin - gpui::point(px(1.0), px(1.0)),
+                    // A cached sidebar frame replays this request, which
+                    // must not outlive the card.
+                    check_visible_and_update: std::rc::Rc::new(move |_, _, cx| {
+                        shell.upgrade().is_some_and(|shell| {
+                            shell.read(cx).session_hover_card.shown() == Some(chat_id.as_str())
+                        })
+                    }),
+                });
+            },
+            |_, _, _, _| {},
         )
+        .absolute()
+        .top_0()
+        .left_full()
+        .into_any_element()
     }
 
     /// The card's face for `chat_id`, drawn by [`SessionCardView`].

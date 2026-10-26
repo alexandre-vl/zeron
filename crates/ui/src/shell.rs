@@ -9015,14 +9015,7 @@ impl Shell {
             && !preview
             && rename_input.is_none()
             && self.session_hover_card.shown() == Some(id.as_str()))
-        .then(|| {
-            self.render_session_hover_card(
-                &id,
-                time_ago.clone(),
-                cx,
-            )
-        })
-        .flatten();
+        .then(|| self.render_session_hover_card(&id, time_ago.clone(), cx));
         let card_id = id.clone();
         // Hover fades over transition-colors (zeron session-row.tsx) — both
         // the wash and the title brighten ride the same 150ms blend.
