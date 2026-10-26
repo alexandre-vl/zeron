@@ -1003,6 +1003,11 @@ impl AppearancePage {
         true
     }
 
+    /// Whether a dialog [`Self::dismiss_on_escape`] would close is open.
+    pub(crate) fn has_escape_surface(&self) -> bool {
+        self.import_dialog.is_some() || self.review_entry.is_some()
+    }
+
     /// Escape that reached Settings unclaimed closes the topmost dialog
     /// (import, else the mapping review) first, so it never closes Settings
     /// under it. Returns whether it did.

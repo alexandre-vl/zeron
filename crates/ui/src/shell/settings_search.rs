@@ -182,6 +182,7 @@ impl Shell {
             .child(
                 icon(icons::MAGNIFER)
                     .size(px(14.0))
+                    .flex_none()
                     .text_color(theme.text_muted),
             )
             .child(
@@ -556,6 +557,31 @@ mod tests {
         shell.read_with(cx, |shell, _| {
             assert_eq!(shell.route, Route::Settings(SettingsSection::Appshots));
         });
+        assert!(field_focused(&shell, cx));
+    }
+
+    /// A dialog over the page keeps the keyboard: ⌘F waits until it closes.
+    #[gpui::test]
+    fn mod_f_leaves_an_open_dialog_the_keyboard(cx: &mut TestAppContext) {
+        let (shell, cx, _dir) = open_settings(cx);
+        shell.update(cx, |shell, cx| {
+            shell.open_settings(SettingsSection::Archived, cx)
+        });
+        draw(cx);
+        shell.update(cx, |shell, cx| {
+            let page = shell.archived_page.clone().expect("the Archived page");
+            page.update(cx, |page, cx| page.open_delete_all_confirm(cx));
+        });
+        draw(cx);
+        cx.simulate_keystrokes(&platform_combo("mod-f"));
+        assert!(!field_focused(&shell, cx));
+        // Escape closes the dialog, and ⌘F reaches the field again.
+        cx.simulate_keystrokes("escape");
+        draw(cx);
+        shell.read_with(cx, |shell, _| {
+            assert_eq!(shell.route, Route::Settings(SettingsSection::Archived));
+        });
+        cx.simulate_keystrokes(&platform_combo("mod-f"));
         assert!(field_focused(&shell, cx));
     }
 

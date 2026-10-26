@@ -525,7 +525,7 @@ fn misspelled_word(field: &str, word: &str) -> Option<Range<usize>> {
     };
     let typed = word.as_bytes();
     let mut start = None;
-    for (at, byte) in field.bytes().chain([b' ']).enumerate() {
+    for (at, byte) in field.bytes().chain(*b" ").enumerate() {
         match (byte.is_ascii_alphanumeric(), start) {
             (true, None) => start = Some(at),
             (false, Some(from)) => {

@@ -546,6 +546,15 @@ impl HarnessesPage {
         value
     }
 
+    /// Whether a dialog [`Self::dismiss_on_escape`] would close is open.
+    pub(crate) fn has_escape_surface(&self, cx: &gpui::App) -> bool {
+        self.expanded_harness.is_some()
+            && self
+                .accounts_page
+                .as_ref()
+                .is_some_and(|accounts| accounts.read(cx).has_escape_surface())
+    }
+
     /// Escape that reached Settings unclaimed goes to the expanded provider's
     /// accounts (an open login) first. Returns whether it was consumed.
     pub(crate) fn dismiss_on_escape(&mut self, cx: &mut Context<Self>) -> bool {

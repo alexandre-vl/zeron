@@ -5641,6 +5641,36 @@ impl Shell {
     /// before it gets here. What remains open without holding focus closes
     /// first: the account menu, a sync prompt, then the routed page's dialog
     /// or login flow. Returns whether one did; only then does Settings stay.
+    /// Whether a dialog or menu that Escape would close is open over Settings:
+    /// [`Self::dismiss_settings_escape_surface`] without the dismissing.
+    fn settings_escape_surface_open(&self, cx: &App) -> bool {
+        if self.sync_flow.has_visible_overlay() || self.user_menu.get().is_some() {
+            return true;
+        }
+        let Route::Settings(section) = self.route else {
+            return false;
+        };
+        match section.canonical() {
+            SettingsSection::Devices => self
+                .devices_page
+                .as_ref()
+                .is_some_and(|page| page.read(cx).has_escape_surface()),
+            SettingsSection::Harnesses => self
+                .harnesses_page
+                .as_ref()
+                .is_some_and(|page| page.read(cx).has_escape_surface(cx)),
+            SettingsSection::Appearance => self
+                .appearance_page
+                .as_ref()
+                .is_some_and(|page| page.read(cx).has_escape_surface()),
+            SettingsSection::Archived => self
+                .archived_page
+                .as_ref()
+                .is_some_and(|page| page.read(cx).has_escape_surface()),
+            _ => false,
+        }
+    }
+
     fn dismiss_settings_escape_surface(&mut self, cx: &mut Context<Self>) -> bool {
         if self.sync_flow.has_visible_overlay() {
             return true;
@@ -8488,7 +8518,10 @@ impl Shell {
                     && modifiers.secondary()
                     && modifiers.number_of_modifiers() == 1
                 {
-                    this.focus_settings_search(window, cx);
+                    // A dialog over the page keeps the keyboard.
+                    if !this.settings_escape_surface_open(cx) {
+                        this.focus_settings_search(window, cx);
+                    }
                     cx.stop_propagation();
                 } else if key == "tab" {
                     move_settings_focus(
