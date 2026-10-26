@@ -1054,11 +1054,31 @@ mod pinned_session_tests {
                         "id": "repo", "deviceId": "local", "path": "/repo", "createdAt": Utc::now(),
                     }))
                     .unwrap()];
+                    state.devices = [
+                        ("local", "This Mac", "macos", None),
+                        ("remote", "Build server", "linux", None),
+                        (
+                            "cloud-machine",
+                            "cloud-machine",
+                            "cloud",
+                            Some("cloud-session"),
+                        ),
+                    ]
+                    .into_iter()
+                    .map(|(id, name, platform, capability)| {
+                        serde_json::from_value(serde_json::json!({
+                            "id": id, "name": name, "platform": platform,
+                            "capabilities": capability.into_iter().collect::<Vec<_>>(),
+                        }))
+                        .unwrap()
+                    })
+                    .collect();
                     state.chats = [
                         ("in-repo", Some("repo"), "local"),
                         ("mine", None, "local"),
                         ("theirs", None, "remote"),
                         ("cloudy", None, "cloud-machine"),
+                        ("orphan", None, "removed"),
                     ]
                     .into_iter()
                     .map(|(id, space, device)| {
@@ -1073,12 +1093,13 @@ mod pinned_session_tests {
             }))
         });
         let shell = host.read_with(cx, |host, _| host.0.clone());
-        // One "No project" group per device; a Cloud session's machine is
-        // not a target.
+        // One "No project" group per device; a Cloud session's machine and a
+        // device gone from the registry are not targets.
         for (group, offered) in [
             ("sidebar-group-new-chat-project:repo", true),
             ("sidebar-group-new-chat-project:home:local", true),
             ("sidebar-group-new-chat-project:home:cloud-machine", false),
+            ("sidebar-group-new-chat-project:home:removed", false),
         ] {
             assert_eq!(cx.debug_bounds(group).is_some(), offered, "{group}");
         }
@@ -5990,8 +6011,12 @@ impl Shell {
                 .then(|| {
                     let state = self.state.read(cx);
                     match projectless_device {
-                        // Cloud's per-session machines are not pickable.
-                        Some(device) => (!zeron_proto::is_cloud_device(&device, ""))
+                        // Only a device the composer's picker offers without a
+                        // project: not Cloud (a session's machine or the
+                        // logical device), nor one gone from the registry.
+                        Some(device) => state
+                            .listed_devices()
+                            .any(|d| d.id == device && !crate::cloud::is_cloud(d))
                             .then_some(NewSessionTarget::NoProject(device)),
                         None => state
                             .spaces
@@ -6008,12 +6033,11 @@ impl Shell {
                 // Every device's group reads "No project": name the device.
                 let label: SharedString = match &target {
                     NewSessionTarget::Project(_) => "New chat in project".into(),
-                    NewSessionTarget::NoProject(device) => {
-                        match self.state.read(cx).device_name(device) {
-                            Some(name) => format!("New chat on {name}").into(),
-                            None => "New chat without a project".into(),
-                        }
-                    }
+                    NewSessionTarget::NoProject(device) => format!(
+                        "New chat on {}",
+                        self.state.read(cx).device_name(device).unwrap_or(device)
+                    )
+                    .into(),
                 };
                 div()
                     .id(SharedString::from(format!(
