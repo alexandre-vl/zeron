@@ -2036,11 +2036,11 @@ impl AppState {
 
     /// Composer send fired: overlay the chat as Working until the host writes
     /// the user message back into the transcript or its session row shows the
-    /// turn that runs it ([`PendingSend::adopted_by`]). A remote
-    /// send has no live session row until the host drains the queued command —
-    /// that gap read as "no live run" and flashed the Completed dot, and any
-    /// phantom Working→Idle edge in it rang the done-chime on send (user
-    /// report 2026-08-05).
+    /// turn that runs it ([`PendingSend::adopted_by`]). A remote send has no
+    /// live session row until the host drains the queued command — that gap
+    /// read as "no live run" and flashed the Completed dot, and any phantom
+    /// Working→Idle edge in it rang the done-chime on send (user report
+    /// 2026-08-05).
     pub fn begin_pending_send(&mut self, chat_id: &str, message_id: &str, now: DateTime<Utc>) {
         self.begin_send(chat_id, message_id, false, now);
     }
@@ -5888,7 +5888,10 @@ mod tests {
         let done = ended("new", DoneStatus::Completed, Some("t1"), t(40));
         s.apply_sessions_at(vec![done.clone()], t(40));
         assert_eq!(s.display_status_for(&new, t(40)), ChatIndicator::Completed);
-        assert_eq!(chime(&s, &running, &done, t(40)), Some(crate::sound::Ping::Done));
+        assert_eq!(
+            chime(&s, &running, &done, t(40)),
+            Some(crate::sound::Ping::Done)
+        );
         assert!(!s.send_undelivered("new", t(121)));
     }
 
@@ -5979,7 +5982,10 @@ mod tests {
         let idle = ended("a", DoneStatus::Completed, Some("t0"), t(-3600));
         let caught_up = ended("a", DoneStatus::Completed, Some("t1"), t(-5));
         for (before, row) in [
-            (&previous, ended("a", DoneStatus::Completed, Some("t1"), t(2))),
+            (
+                &previous,
+                ended("a", DoneStatus::Completed, Some("t1"), t(2)),
+            ),
             (&previous, next),
             (&idle, caught_up),
         ] {
@@ -6013,9 +6019,11 @@ mod tests {
 
         // A settled chat's next turn: after a completed turn, a failed one, or
         // one stamped by a host whose clock runs ahead of this device's.
-        let finished = ended("a", DoneStatus::Completed, Some("t0"), sent - TimeDelta::hours(1));
-        let failed = ended("a", DoneStatus::Errored, Some("t0"), sent - TimeDelta::hours(1));
-        let ahead = ended("a", DoneStatus::Completed, Some("t0"), sent + TimeDelta::seconds(1));
+        let hour_ago = sent - TimeDelta::hours(1);
+        let finished = ended("a", DoneStatus::Completed, Some("t0"), hour_ago);
+        let failed = ended("a", DoneStatus::Errored, Some("t0"), hour_ago);
+        let second_on = sent + TimeDelta::seconds(1);
+        let ahead = ended("a", DoneStatus::Completed, Some("t0"), second_on);
         for before in [finished, failed, ahead] {
             let mut s = AppState::new();
             s.apply_sessions_at(vec![before.clone()], sent);
