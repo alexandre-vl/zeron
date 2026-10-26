@@ -1159,6 +1159,7 @@ async fn run_session(session: Session) {
     // The typed fork whose transcript is read off disk (see [`fork_tail`]).
     let claude_root = config_root(&launched.env);
     let mut tail: Option<ForkTail> = None;
+    let mut tail_records = std::collections::VecDeque::new();
 
     'main: loop {
         if std::mem::take(&mut relaunch) {
@@ -1204,11 +1205,19 @@ async fn run_session(session: Session) {
         match norm.fork_to_follow() {
             Some(fork) if tail.as_ref().is_none_or(|t| t.chip != fork.0) => {
                 tail = Some(ForkTail::new(&claude_root, fork));
+                tail_records.clear();
             }
             Some(_) => {}
-            None => tail = None,
+            None => {
+                tail = None;
+                tail_records.clear();
+            }
         }
-        let tail_at = tail.as_ref().and_then(ForkTail::next_read);
+        let tail_at = tail
+            .as_ref()
+            .filter(|_| tail_records.is_empty())
+            .and_then(ForkTail::next_read);
+        let tail_reading = tail.as_ref().is_some_and(ForkTail::is_reading);
         tokio::select! {
             line = stdout_lines.next_line() => match line {
                 Ok(Some(line)) => {
@@ -1435,11 +1444,25 @@ async fn run_session(session: Session) {
                 }
             },
 
-            // The typed fork's records, as it writes them.
+            // Disk work never occupies this loop: stdout, Stop and steering
+            // keep flowing even when the transcript is on slow storage.
             _ = tokio::time::sleep_until(tail_at.unwrap_or_else(tokio::time::Instant::now)),
                 if tail_at.is_some() => {
-                let records = tail.as_mut().map_or_else(Vec::new, ForkTail::read);
-                for ev in records.into_iter().flat_map(|record| norm.fork_record(record)) {
+                if let Some(tail) = tail.as_mut() {
+                    tail.start_read();
+                }
+            },
+
+            records = async { tail.as_mut().expect("read in flight").read_done().await },
+                if tail_reading => {
+                tail_records.extend(records);
+            },
+
+            // Give controls and stdout a selection opportunity between disk
+            // records instead of draining an entire backlog in one branch.
+            _ = std::future::ready(()), if !tail_records.is_empty() => {
+                let record = tail_records.pop_front().expect("queued record");
+                for ev in norm.fork_record(record) {
                     if event_tx.send(Ok(ev)).await.is_err() {
                         break 'main;
                     }
