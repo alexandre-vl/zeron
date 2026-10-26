@@ -81,10 +81,20 @@ final class QuestionPanel: UIView, UITextFieldDelegate, UITextViewDelegate {
 
         let buttons = UIStackView(arrangedSubviews: [back, UIView(), nextButton])
         buttons.axis = .horizontal
-        let stack = UIStackView(arrangedSubviews: [header, question, options, other, editor, buttons])
+        // The question wraps clear of the corner close (8pt in, 36pt wide).
+        let questionRow = UIView()
+        question.translatesAutoresizingMaskIntoConstraints = false
+        questionRow.addSubview(question)
+        NSLayoutConstraint.activate([
+            question.topAnchor.constraint(equalTo: questionRow.topAnchor),
+            question.leadingAnchor.constraint(equalTo: questionRow.leadingAnchor),
+            question.trailingAnchor.constraint(equalTo: questionRow.trailingAnchor, constant: -36),
+            question.bottomAnchor.constraint(equalTo: questionRow.bottomAnchor),
+        ])
+        let stack = UIStackView(arrangedSubviews: [header, questionRow, options, other, editor, buttons])
         stack.axis = .vertical
         stack.spacing = 10
-        stack.setCustomSpacing(14, after: question)
+        stack.setCustomSpacing(14, after: questionRow)
         stack.setCustomSpacing(14, after: other)
         stack.translatesAutoresizingMaskIntoConstraints = false
         card.contentView.addSubview(stack)

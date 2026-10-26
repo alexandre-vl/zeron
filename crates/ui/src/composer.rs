@@ -10148,6 +10148,8 @@ impl Composer {
                     .child(
                         div()
                             .mt(px(6.0))
+                            // Wraps clear of the corner close (12px in, 28px wide).
+                            .pr(px(32.0))
                             .text_size(crate::typography::ui_rems(15.0))
                             .line_height(px(20.0))
                             .font_weight(gpui::FontWeight::MEDIUM)
@@ -10243,6 +10245,12 @@ impl Composer {
                         cx.stop_propagation();
                         this.wizard_dismiss(cx);
                     }))
+                    .on_a11y_action(gpui::AccessibleAction::Click, {
+                        let composer = cx.entity().downgrade();
+                        move |_, _, cx| {
+                            composer.update(cx, |this, cx| this.wizard_dismiss(cx)).ok();
+                        }
+                    })
                     .child(
                         crate::icons::icon(crate::icons::CLOSE)
                             .size(px(16.0))
