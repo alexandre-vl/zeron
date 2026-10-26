@@ -5385,11 +5385,14 @@ impl Pickers {
                 ));
             }
         }
-        let star_hint = if is_fav {
-            "Remove from favorites"
+        // The compact picker's wording: the name tells a screen reader's
+        // list of stars apart.
+        let star_hint: SharedString = if is_fav {
+            format!("Remove {} from favorites", row.model.label)
         } else {
-            "Add to favorites"
-        };
+            format!("Add {} to favorites", row.model.label)
+        }
+        .into();
         el = el.child(
             div()
                 .id(("model-star", ix))
@@ -5403,13 +5406,13 @@ impl Pickers {
                 .cursor_pointer()
                 .hover(|s| s.bg(crate::theme::ink(0.08)))
                 .role(gpui::Role::Button)
-                .aria_label(star_hint)
+                .aria_label(star_hint.clone())
                 .aria_toggled(if is_fav {
                     gpui::Toggled::True
                 } else {
                     gpui::Toggled::False
                 })
-                .tooltip(move |_, cx| cx.new(|_| compact::PickerHint(star_hint.into())).into())
+                .tooltip(move |_, cx| cx.new(|_| compact::PickerHint(star_hint.clone())).into())
                 .on_click(cx.listener(move |this, _, _, cx| {
                     cx.stop_propagation();
                     this.toggle_model_favorite(harness, &star_model, cx);

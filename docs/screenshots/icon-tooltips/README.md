@@ -28,9 +28,9 @@ the app's own message: the start failed before any audio device opened.
 | `editor-hide-comment.png` | Comment marker, comment open | Hide comment |
 | `picker-starred-tab.png` | Model picker's star tab | Starred |
 | `picker-agent-tab.png` | Model picker's agent tab | Claude Code |
-| `picker-add-favorite.png` | A model's star, off | Add to favorites |
-| `picker-remove-favorite.png` | A model's star, on | Remove from favorites |
-| `compact-picker-back.png` | Compact picker's back arrow | Back |
+| `picker-add-favorite.png` | A model's star, off | Add to favorites¹ |
+| `picker-remove-favorite.png` | A model's star, on | Remove from favorites¹ |
+| `compact-picker-back.png` | Compact picker's back arrow | Back¹ |
 | `pull-requests-clear-search.png` | × in the board's search | Clear search |
 | `pull-request-send-comment.png` | Send in the Activity comment box | Send comment |
 | `appearance-accent-swatch.png` | An accent swatch | Orange |
@@ -47,6 +47,10 @@ the app's own message: the start failed before any audio device opened.
 | `section-dialog-close.png` | × on New section | Close |
 | `voice-error-dismiss.png` | × on the voice error | Dismiss |
 | `new-project-hidden-folders.png` | "…" in New project's folder trail | Show hidden folders |
+
+¹ Reworded after capture: the full picker's star now names its model, as the
+compact picker's does ("Add GPT-5.4 to favorites"), and Back shows its
+shortcut ("Back · Esc").
 
 Validation: `cargo test -p zeron-ui --lib -- --test-threads=1` at `bdb4e0c4`
 passed (1875 tests, 0 failed), and `git show --check` is clean. A parallel
