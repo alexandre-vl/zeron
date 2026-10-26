@@ -306,11 +306,13 @@ pub fn run_app(config: UiConfig) {
         cx.set_menus(app_menus::app_menus());
         // Switching keyboard layout moves the keys behind ⌘-shortcuts (AZERTY
         // reaches ⌘1 as ⌘&): rebind against the new layout, then refresh the
-        // menu bar's snapshot of the keymap.
+        // menu bar's snapshot of the keymap and redraw the hints that name
+        // those keys.
         cx.on_keyboard_layout_change(|cx| {
             let settings = settings::current(cx);
             shell::apply_keymap(cx, &settings.keymap, settings.composer_send_behavior);
             cx.set_menus(app_menus::app_menus());
+            cx.refresh_windows();
         })
         .detach();
         cx.activate(true);

@@ -2013,16 +2013,21 @@ pub fn display_combo_on(mac: bool, combo: &str) -> String {
             "mod" => if mac { "Cmd" } else { "Ctrl" }.to_string(),
             "alt" => if mac { "Opt" } else { "Alt" }.to_string(),
             "shift" => "Shift".to_string(),
-            other => {
-                let mut chars = other.chars();
-                match chars.next() {
-                    Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-                    None => String::new(),
-                }
-            }
+            other => key_label(other),
         })
         .collect::<Vec<_>>()
         .join("+")
+}
+
+/// A key as its keycap prints it: ASCII capitalized ("a" → "A", "tab" →
+/// "Tab"), a layout's own letters as typed — AZERTY's ⌘2 key is é, and "É"
+/// would read as Shift+é.
+fn key_label(key: &str) -> String {
+    let mut chars = key.chars();
+    match chars.next() {
+        Some(first) => first.to_ascii_uppercase().to_string() + chars.as_str(),
+        None => String::new(),
+    }
 }
 
 /// Compact combo for badge surfaces (the sidebar jump hints): macOS spells
@@ -2049,11 +2054,7 @@ pub fn badge_combo_on(mac: bool, combo: &str) -> String {
     {
         out.push(glyph);
     }
-    let mut chars = key.chars();
-    if let Some(first) = chars.next() {
-        out.extend(first.to_uppercase());
-        out.push_str(chars.as_str());
-    }
+    out.push_str(&key_label(key));
     out
 }
 
@@ -4615,6 +4616,11 @@ mod tests {
         assert_eq!(badge_combo("mod-b"), badge_combo_on(mac, "mod-b"));
         set_bound_key_equivalents(KeyEquivalents::default());
         assert_eq!(badge_combo("mod-1"), badge_combo_on(mac, "mod-1"));
+        // The layout's own letters read as their keycaps print them: ⌘é is
+        // no Shift chord.
+        assert_eq!(badge_combo_on(true, "mod-é"), "⌘é");
+        assert_eq!(display_combo_on(true, "mod-é"), "Cmd+é");
+        assert_eq!(badge_combo_on(true, "mod-shift-a"), "⇧⌘A");
     }
 
     #[test]
