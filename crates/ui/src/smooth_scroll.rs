@@ -65,11 +65,13 @@ thread_local! {
     static KEEP_RAW: Cell<bool> = const { Cell::new(false) };
     /// [`enabled`] as of the last root paint, for AppKit callbacks, which
     /// can't read the App.
+    #[cfg(target_os = "macos")]
     static GLIDING: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Whether notches glide, for wheels that never reach a window root: a macOS
 /// web page gets its wheel from AppKit (`browser::macos`).
+#[cfg(target_os = "macos")]
 pub(crate) fn gliding() -> bool {
     GLIDING.get()
 }
@@ -527,6 +529,7 @@ impl Element for SmoothScroll {
                 (root.clone(), root)
             })
         });
+        #[cfg(target_os = "macos")]
         GLIDING.set(enabled(cx));
         // Both first in their capture phase, where nothing in the tree can
         // stop them: a claim left by a wheel event that never reached the
