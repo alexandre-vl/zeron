@@ -3435,6 +3435,10 @@ pub struct Transcript {
     /// deferred decision in [`Transcript::handle_scroll`] must not re-engage
     /// it.
     input_escaped: bool,
+    /// The list took the wheel event in flight ([`Transcript::handle_scroll`]
+    /// runs first): a wheel the list never saw (one an overlay above it let
+    /// bubble) must not break the pin.
+    list_took_input: bool,
     /// A locally-sent prompt currently held near the viewport top while its
     /// reply grows into the empty space below it.
     own_turn: Option<OwnTurnAnchor>,
@@ -3805,6 +3809,7 @@ impl Transcript {
             last_scroll_distance: 0.0,
             pinned,
             input_escaped: false,
+            list_took_input: false,
             own_turn: None,
             pending_queued_turns: PendingQueuedTurns::default(),
             own_turn_kick: false,
@@ -4180,6 +4185,7 @@ impl Transcript {
         // wheel/touch input. Neither operation reads the borrowed ListState.
         self.user_collapse_scroll = None;
         self.cancel_user_hold();
+        self.list_took_input = true;
         let released_own_turn = self.own_turn.as_ref().is_some_and(|anchor| anchor.held);
         self.release_own_turn_hold();
         if self.own_turn.is_some() {
@@ -4198,6 +4204,7 @@ impl Transcript {
         cx.defer(move |cx| {
             this.update(cx, |this: &mut Transcript, cx| {
                 this.discard_pending_viewport();
+                this.list_took_input = false;
                 let escaped = std::mem::take(&mut this.input_escaped);
                 // Input owns the viewport immediately, including wheel-down
                 // after background streaming. A held turn can be stale while
@@ -4278,7 +4285,7 @@ impl Transcript {
     /// arrive on frames, where the spring's step runs before that deferred
     /// decision, pulling the view back and recording the distance it then
     /// compares against. Children bubble first, so the list has applied the
-    /// input by now.
+    /// input by now, or never saw it.
     fn on_scroll_wheel(
         &mut self,
         event: &ScrollWheelEvent,
@@ -4289,7 +4296,9 @@ impl Transcript {
             ScrollDelta::Pixels(delta) => delta.y > px(0.0),
             ScrollDelta::Lines(delta) => delta.y > 0.0,
         };
-        self.input_escaped = toward_top && self.list.max_offset_for_scrollbar().y > px(0.0);
+        self.input_escaped = std::mem::take(&mut self.list_took_input)
+            && toward_top
+            && self.list.max_offset_for_scrollbar().y > px(0.0);
         if self.input_escaped {
             self.pinned = false;
             self.spring.reset();
@@ -11316,6 +11325,20 @@ mod tests {
         };
         assert!(transcript.read_with(cx, |this, _| this.pinned));
         assert!(distance(cx) <= 1.0, "{}", distance(cx));
+
+        // A wheel the list never took (an overlay above it let it bubble)
+        // leaves the pin alone.
+        transcript.update_in(cx, |this, window, cx| {
+            this.on_scroll_wheel(
+                &gpui::ScrollWheelEvent {
+                    delta: gpui::ScrollDelta::Lines(gpui::point(0.0, 3.0)),
+                    ..Default::default()
+                },
+                window,
+                cx,
+            );
+            assert!(this.pinned, "a wheel the list never saw broke the pin");
+        });
 
         // One 3-line notch up. Its glide starts and ends with slices well
         // under a pixel.
