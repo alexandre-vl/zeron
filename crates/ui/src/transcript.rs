@@ -13687,27 +13687,31 @@ mod tests {
             }
         }
         // Each card used to come up 6px short, so the clip grew with the
-        // count: check one card, the reported four, and well past it.
-        for count in [1, 4, 5, 12] {
+        // count: check one card, the reported four, and well past it. Regular
+        // mode's always-open spawn row must keep fitting too.
+        for (compact, count) in [true, false]
+            .into_iter()
+            .flat_map(|compact| [1, 4, 5, 12].map(|count| (compact, count)))
+        {
             let mut parts = vec![
                 reasoning_part("r0", "planning the search"),
                 text_part("t0", "Launching searches in parallel."),
             ];
             parts.extend((1..=count).map(|i| agent_part(&format!("s{i}"), &format!("Search {i}"))));
             let entry = assistant("m-spawn", MessageStatus::Streaming, parts);
-            // The open work fold mounts the compact-off rows; the spawn group
-            // is one of them, and compact mode wraps it in its own fold.
-            let row = rows_for_entry(&entry, false, true, &mut parse)
+            // Compact: the open work fold mounts the compact-off rows; the
+            // spawn group is one of them, wrapped in its own fold.
+            let row = rows_for_entry(&entry, false, compact, &mut parse)
                 .into_iter()
                 .find(|row| {
-                    row.compact_fold.is_some()
+                    row.compact_fold.is_some() == compact
                         && matches!(&row.kind, RowKind::ToolGroup { tools, .. }
                             if tools.len() == count && tools.iter().all(is_spawn_link))
                 })
-                .expect("the work fold mounts the spawn group");
+                .expect("the spawn group has a row");
             let state = cx.new(|_| AppState::new());
             let transcript = cx.new(|cx| Transcript::new(state, cx));
-            transcript.update(cx, |this, _| this.compact_mode = true);
+            transcript.update(cx, |this, _| this.compact_mode = compact);
             let opened: Rc<RefCell<Vec<String>>> = Rc::default();
             cx.update(|cx| {
                 let opened = opened.clone();
@@ -13739,7 +13743,7 @@ mod tests {
             for (ix, card) in cards.iter().enumerate() {
                 assert!(
                     card.bottom() <= fold.bottom(),
-                    "{count} spawns: card {ix} ends at {:?}, but the fold clips at {:?}",
+                    "compact {compact}, {count} spawns: card {ix} ends at {:?}, but the fold clips at {:?}",
                     card.bottom(),
                     fold.bottom(),
                 );
