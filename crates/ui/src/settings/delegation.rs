@@ -10,8 +10,7 @@ use zeron_proto::HarnessId;
 use zeron_rpc::methods;
 
 /// The Delegation row's line while the device can switch it.
-const NATIVE_SUBAGENTS_HINT: &str = "Off: delegate through side chats instead. Applies to each \
-                                     chat's next turn once its background work is done.";
+const NATIVE_SUBAGENTS_HINT: &str = "Off: delegate through side chats, from each chat's next turn.";
 
 /// The Delegation row's line when the device can't answer; an engine that
 /// predates the setting gets commit credit's wording.
