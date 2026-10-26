@@ -81,17 +81,21 @@ final class QuestionPanel: UIView, UITextFieldDelegate, UITextViewDelegate {
 
         let buttons = UIStackView(arrangedSubviews: [back, UIView(), nextButton])
         buttons.axis = .horizontal
-        // The question wraps clear of the corner close (8pt in, 36pt wide).
-        let questionRow = UIView()
-        question.translatesAutoresizingMaskIntoConstraints = false
-        questionRow.addSubview(question)
-        NSLayoutConstraint.activate([
-            question.topAnchor.constraint(equalTo: questionRow.topAnchor),
-            question.leadingAnchor.constraint(equalTo: questionRow.leadingAnchor),
-            question.trailingAnchor.constraint(equalTo: questionRow.trailingAnchor, constant: -36),
-            question.bottomAnchor.constraint(equalTo: questionRow.bottomAnchor),
-        ])
-        let stack = UIStackView(arrangedSubviews: [header, questionRow, options, other, editor, buttons])
+        // The header and question wrap clear of the corner close (8pt in, 36pt wide).
+        func clearOfClose(_ label: UILabel) -> UIView {
+            let row = UIView()
+            label.translatesAutoresizingMaskIntoConstraints = false
+            row.addSubview(label)
+            NSLayoutConstraint.activate([
+                label.topAnchor.constraint(equalTo: row.topAnchor),
+                label.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+                label.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -36),
+                label.bottomAnchor.constraint(equalTo: row.bottomAnchor),
+            ])
+            return row
+        }
+        let questionRow = clearOfClose(question)
+        let stack = UIStackView(arrangedSubviews: [clearOfClose(header), questionRow, options, other, editor, buttons])
         stack.axis = .vertical
         stack.spacing = 10
         stack.setCustomSpacing(14, after: questionRow)

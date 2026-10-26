@@ -453,6 +453,7 @@ async fn a_fork_settles_the_running_subagent_chips_it_copies() {
                         multi_select: false,
                     }],
                     resolved: false,
+                    answers: None,
                 },
             ],
             ..message("a1", MessageRole::Assistant, "", MessageStatus::Complete)
@@ -466,7 +467,8 @@ async fn a_fork_settles_the_running_subagent_chips_it_copies() {
         )
         .await
         .unwrap();
-    // Each chip's (subagentRef, subagentStatus), then each question's `resolved`.
+    // Each chip's (subagentRef, subagentStatus), then each question's
+    // (`resolved`, `answers`).
     let settled = |chat: &str| {
         let parts: Vec<_> = core
             .doc_host
@@ -492,7 +494,9 @@ async fn a_fork_settles_the_running_subagent_chips_it_copies() {
         let questions: Vec<_> = parts
             .iter()
             .filter_map(|p| match p {
-                MessagePart::Input { resolved, .. } => Some(*resolved),
+                MessagePart::Input {
+                    resolved, answers, ..
+                } => Some((*resolved, answers.clone())),
                 _ => None,
             })
             .collect();
@@ -507,10 +511,15 @@ async fn a_fork_settles_the_running_subagent_chips_it_copies() {
             ),
         ]
     };
-    assert_eq!(settled("side"), (chips(SubagentStatus::Failed), vec![true]));
+    // The fork's copy of the open question reads closed unanswered; the
+    // source's stays open.
+    assert_eq!(
+        settled("side"),
+        (chips(SubagentStatus::Failed), vec![(true, Some(vec![]))])
+    );
     assert_eq!(
         settled("main"),
-        (chips(SubagentStatus::Running), vec![false])
+        (chips(SubagentStatus::Running), vec![(false, None)])
     );
     core.shutdown().await;
 }

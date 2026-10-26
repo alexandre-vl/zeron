@@ -10120,6 +10120,8 @@ impl Composer {
                             .flex_row()
                             .items_center()
                             .gap(px(10.0))
+                            // Clear of the corner close, like the question.
+                            .pr(px(32.0))
                             .child(
                                 div()
                                     .text_size(crate::typography::ui_rems(10.5))
