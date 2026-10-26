@@ -2097,6 +2097,39 @@ mod tests {
         assert_eq!(host.peer_liveness("laptop"), zeron_rpc::PeerLiveness::Live);
     }
 
+    /// A claimed row doesn't know its parent until the chat's `createChat`
+    /// lands, which records `parentChatId` even when it has none; a row this
+    /// host never claimed always knows it.
+    #[tokio::test]
+    async fn a_claimed_chat_knows_its_parent_once_its_create_lands() {
+        use super::*;
+
+        let dir = tempfile::tempdir().unwrap();
+        let host = WorkspaceHost::open(
+            Arc::new(DocsStore::open(dir.path()).unwrap()),
+            WorkspaceHostConfig {
+                device_id: "test-device".into(),
+                device_name: "Test device".into(),
+                platform: "macos".into(),
+                org_id: "test-org".into(),
+                user_id: "test-user".into(),
+                edge: None,
+                local_only: false,
+            },
+        )
+        .unwrap();
+        host.create_chat("created", None, Some("test-device"), None, None)
+            .unwrap();
+        assert!(!host.parent_unknown("created"));
+
+        host.claim_chat("claimed", Some("/tmp")).unwrap();
+        assert!(host.parent_unknown("claimed"));
+        let mut chat = host.chat("claimed").unwrap().expect("the claimed row");
+        chat.parent_chat_id = None;
+        host.mutate(|doc| doc.upsert_chat(&chat)).unwrap();
+        assert!(!host.parent_unknown("claimed"));
+    }
+
     #[tokio::test]
     async fn sidebar_preferences_watch_preserves_explicit_empty_state() {
         use super::*;
