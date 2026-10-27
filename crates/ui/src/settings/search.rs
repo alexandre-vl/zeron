@@ -103,6 +103,8 @@ settings_index! {
         "animations accessibility"),
     (PauseAnimations, Appearance, Some("Motion"), "Pause animations in background",
         "focus unfocused inactive window battery"),
+    (SmoothScrolling, Appearance, Some("Motion"), "Smooth scrolling",
+        "mouse wheel glide ease"),
     (ThemeLibrary, Appearance, None, "Theme library",
         "import add custom themes"),
     (InterfaceFont, Appearance, Some("Fonts and layout"), "Interface font",
@@ -702,7 +704,7 @@ mod tests {
 
     #[test]
     fn titles_outrank_groups_pages_and_terms() {
-        // "Motion" is one row's title and the other's group.
+        // "Motion" is one row's title and the others' group.
         assert_eq!(
             titles("motion")[..2],
             ["Reduce motion", "Pause animations in background"]
@@ -721,6 +723,10 @@ mod tests {
         // Terms find what the title does not say.
         assert_eq!(top("frosted"), Target::Setting(SettingId::Glass));
         assert_eq!(top("latex"), Target::Setting(SettingId::RenderMath));
+        assert_eq!(
+            top("mouse wheel"),
+            Target::Setting(SettingId::SmoothScrolling)
+        );
         // A row's own words outrank the block it shares: "size" is the font
         // rows' word, while "font" only names Math size's block.
         assert_eq!(top("font size"), Target::Setting(SettingId::InterfaceFont));

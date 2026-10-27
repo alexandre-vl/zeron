@@ -4078,6 +4078,7 @@ impl Render for AppearancePage {
                             cx.notify();
                         })),
                 )
+                .search_anchor(SettingId::SmoothScrolling)
                 .into_any_element(),
         ];
         let library_rows = self.render_theme_library_rows(&theme, cx);
