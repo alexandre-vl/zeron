@@ -50,10 +50,13 @@ Ten defects were found:
   from the store.
 - Link state (C1, C7, C8): `AppState::chat_link_at` returns
   `ChatLink { sync, host_unreachable }`. An unsynced remote chat is `Syncing`,
-  captioned after 4 s, and becomes `Stalled` only once its room dial has stayed
-  down for 35 s (the engine's 20 s connect plus 15 s hello budget). The clocks
-  are the view's own: opening a chat restarts its caption hold, waiting for a
-  sync slot never stalls, and a new engine's first frame restarts them all.
+  captioned after 4 s, and becomes `Stalled` only once its room has stayed
+  down for 35 s of the sync (the engine's 20 s connect plus 15 s hello
+  budget); a joined room catching up never stalls. The clocks are the view's
+  own: opening a chat restarts its hold and stall, a room moved back to
+  waiting for a slot keeps its clock (so a sync that never delivers always
+  stalls instead of spinning), and a new engine's first frame restarts them
+  all.
   Both moments are clock transitions for the open chat and for chats with a
   pending send. `delivery_live` counts as live unless the engine is offline.
   Host presence is a separate flag, and a sleeping Cloud machine never sets it.
@@ -181,15 +184,14 @@ the loader lies inside its pane: Bounds { origin: Point { x: 371px, y: 600px }, 
 ```
 
 Every fix below was checked the same way. The loader layout and six of the UI
-rules were reverted together in one build, "waiting for a slot never dials"
-alone in a second, and the engine rule in an engine build. Each test failed on
-its own rule's assertion:
+rules were reverted together in one build, a slot-waiting rule since replaced
+(see the findings) alone in a second, and the engine rule in an engine build.
+Each test failed on its own rule's assertion:
 
 ```text
 reverted rule                              failing test, assertion
 first frame restarts sync clocks           a_new_engine_restarts_sync_clocks: left: Stalled right: Syncing { shown: true }
-opening restarts the caption hold          waiting_for_a_sync_slot_never_reads_as_an_outage: left: Syncing { shown: true } right: Syncing { shown: false }
-waiting for a slot never dials             waiting_for_a_sync_slot_never_reads_as_an_outage: left: Stalled right: Syncing { shown: true }
+opening restarts the caption hold          waiting_for_a_sync_slot_never_reads_as_an_outage (since replaced by a_sync_that_never_delivers_stalls_even_back_in_the_queue): left: Syncing { shown: true } right: Syncing { shown: false }
 syncing is not undelivered                 a_send_on_a_syncing_chat_is_not_undelivered: !s.send_undelivered("c-remote", late)
 deadlines for open chat, pending sends     chat_sync_caption_and_stall_are_clock_transitions: left: 2 right: 0
 retry per tab                              retrying_a_fork_never_waits_on_another: the retry goes out at once
@@ -204,7 +206,9 @@ The review's findings and what was done:
 | Loader laid out below the list, clipped | Fixed; render-bounds test |
 | A send held while syncing also read "Not delivered" | Fixed: not undelivered while syncing |
 | Sync clocks kept across an engine restart | Fixed: the first frame after attach restarts them |
-| A chat that waited for a sync slot read as stalled when opened | Fixed: a stall counts from the dial; opening restarts the caption hold |
+| A chat that waited for a sync slot read as stalled when opened | Fixed: opening restarts the caption hold and the stall |
+| A room moved back to waiting for a slot restarted its stall, so a sync that never delivered could spin "Syncing…" forever | Fixed (maintainer): only delivery or opening the chat restarts the clock; `a_sync_that_never_delivers_stalls_even_back_in_the_queue` |
+| Transcript loader spun while hard offline; fork failure printed the engine error in red | Fixed (maintainer): offline is the amber dot, as in the composer and sidebar; the failure is a plain empty state with a ghost Retry |
 | Opening a pending fork's row showed the wait | Fixed: the row finishes the fork |
 | Retry did nothing while another fork ran | Fixed: per-tab request tracking |
 | Clock notifications for every background syncing chat | Fixed: the open chat and pending sends only |

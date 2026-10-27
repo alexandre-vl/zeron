@@ -3891,6 +3891,18 @@ impl Transcript {
             L::Reconnecting => "Reconnecting…",
             L::Offline => "Offline — this chat loads when you're back online",
         };
+        let caption = div()
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .text_size(crate::typography::ui_rems(12.0))
+            .text_color(theme.text_faint)
+            // Hard offline waits on nothing this app does: the amber dot the
+            // composer and sidebar use, not a spinner.
+            .when(loading == L::Offline, |row| {
+                row.child(div().size(px(5.0)).rounded_full().bg(theme.warning))
+            })
+            .child(SharedString::from(caption));
         // The overlay is positioned by a still wrapper: `fade_in` restyles
         // its element `relative` every frame, which would drop it into the
         // flow below the full-height list, where the pane clips it.
@@ -3908,17 +3920,14 @@ impl Transcript {
                     .flex_col()
                     .items_center()
                     .gap(px(8.0))
-                    .child(crate::loaders::ring_spinner(
-                        "transcript-loader",
-                        20.0,
-                        theme.text_muted,
-                    ))
-                    .child(
-                        div()
-                            .text_size(crate::typography::ui_rems(12.0))
-                            .text_color(theme.text_faint)
-                            .child(SharedString::from(caption)),
-                    ),
+                    .when(loading != L::Offline, |column| {
+                        column.child(crate::loaders::ring_spinner(
+                            "transcript-loader",
+                            20.0,
+                            theme.text_muted,
+                        ))
+                    })
+                    .child(caption),
             ))
             .into_any_element()
     }

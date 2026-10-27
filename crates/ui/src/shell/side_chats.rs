@@ -499,21 +499,26 @@ impl Shell {
                         }),
                 )
                 .into_any_element(),
-            Some(error) => crate::popover::error_row(&theme, &error)
+            // An empty state, not an alarm: the engine's reason is the
+            // detail under a plain title, and Retry is the pane's one action.
+            Some(error) => div()
+                .flex()
+                .flex_col()
                 .items_center()
+                .max_w(px(420.0))
+                .text_center()
+                .child(super::command_palette::palette_empty(
+                    &theme,
+                    match host {
+                        Some(host) => SharedString::from(format!("Couldn't fork on {host}")),
+                        None => SharedString::from("Couldn't fork this chat"),
+                    },
+                    error,
+                ))
                 .child(
-                    div()
+                    popover::btn_ghost(&theme, "Retry", format!("pending-fork-retry-{id}"))
                         .id(("pending-fork-retry", id))
-                        .px(px(Theme::SPACE_SM))
-                        .py(px(3.0))
-                        .rounded(px(Theme::CONTROL_RADIUS))
-                        .border_1()
-                        .border_color(theme.border)
-                        .text_color(theme.text)
-                        .cursor_pointer()
-                        .hover(|s| s.bg(theme.glass_hover()))
-                        .on_click(cx.listener(move |this, _, _, cx| this.retry_fork(id, cx)))
-                        .child(SharedString::from("Retry")),
+                        .on_click(cx.listener(move |this, _, _, cx| this.retry_fork(id, cx))),
                 )
                 .into_any_element(),
         };

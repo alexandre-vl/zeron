@@ -734,9 +734,9 @@ pub const UNDELIVERED_GRACE_MS: i64 = 120_000;
 /// A chat must sync this long before it says so: a quick open never flashes
 /// a caption (the engine's degrade grace is the same 4 s).
 pub const SYNC_SHOWN_AFTER_MS: i64 = 4_000;
-/// A room still down this long after its dial began has outlived a whole
-/// first dial (20 s connect + 15 s hello deadline): from here a send waits
-/// for the connection, it is no longer just a slow open.
+/// A room still down this long into a sync has outlived a whole first dial
+/// (20 s connect + 15 s hello deadline): from here a send waits for the
+/// connection, it is no longer just a slow open.
 pub const SYNC_STALLED_AFTER_MS: i64 = 35_000;
 
 /// How the path from this device to a chat's host reads right now. One
@@ -760,7 +760,7 @@ pub enum LinkSync {
     Syncing {
         shown: bool,
     },
-    /// Its room dial stayed down past [`SYNC_STALLED_AFTER_MS`].
+    /// Its room stayed down [`SYNC_STALLED_AFTER_MS`] into the sync.
     Stalled,
     /// The registry is down and this chat has no live room of its own, or
     /// an engine without per-chat sync states reports its room down.
@@ -812,13 +812,13 @@ fn chat_syncing(chat: &zeron_proto::ChatConnectivity) -> bool {
 /// How long one chat has been syncing, as this view saw it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct SyncClock {
-    /// The caption's hold counts from here: when the sync began, or when
-    /// the chat was opened during it, so a sync already under way in the
-    /// background never flashes a caption onto a chat just opened.
+    /// The caption's hold and the stall both count from here: when the sync
+    /// began, or when the chat was opened during it, so a sync already
+    /// under way in the background never flashes a caption, or reads as
+    /// stalled, on a chat just opened. Nothing else restarts it: a room the
+    /// engine moves back to waiting for a slot keeps its clock, so a sync
+    /// that never delivers always ends up stalled instead of spinning.
     began: DateTime<Utc>,
-    /// When its room dial began. A stall counts from here: waiting for a
-    /// sync slot is no outage.
-    dialing: Option<DateTime<Utc>>,
 }
 
 /// The Cloud setup placeholder's step while the machine comes up; the
@@ -1640,17 +1640,9 @@ impl AppState {
                 .any(|chat| chat.chat_id == *id && chat_syncing(chat))
         });
         for chat in connectivity.chats.iter().filter(|chat| chat_syncing(chat)) {
-            let clock = self
-                .sync_clocks
+            self.sync_clocks
                 .entry(chat.chat_id.clone())
-                .or_insert(SyncClock {
-                    began: now,
-                    dialing: None,
-                });
-            clock.dialing = match chat.sync_state {
-                zeron_proto::ChatSyncState::Waiting => None,
-                _ => Some(clock.dialing.unwrap_or(now)),
-            };
+                .or_insert(SyncClock { began: now });
         }
         self.connectivity = connectivity;
         self.connectivity_observed = true;
@@ -1701,17 +1693,17 @@ impl AppState {
                 C::Unknown if net.connected => LinkSync::Live,
                 C::Unknown => LinkSync::Reconnecting,
                 C::Waiting | C::Connecting | C::Offline => {
-                    let clock = self.sync_clocks.get(chat_id);
-                    let lasted = |since: Option<DateTime<Utc>>, ms: i64| {
-                        since.is_some_and(|since| (now - since).num_milliseconds() >= ms)
+                    let lasted = |ms: i64| {
+                        self.sync_clocks
+                            .get(chat_id)
+                            .is_some_and(|clock| (now - clock.began).num_milliseconds() >= ms)
                     };
-                    if !net.connected
-                        && lasted(clock.and_then(|c| c.dialing), SYNC_STALLED_AFTER_MS)
-                    {
+                    // A joined room catching up a long backlog never stalls.
+                    if !net.connected && lasted(SYNC_STALLED_AFTER_MS) {
                         LinkSync::Stalled
                     } else {
                         LinkSync::Syncing {
-                            shown: lasted(clock.map(|c| c.began), SYNC_SHOWN_AFTER_MS),
+                            shown: lasted(SYNC_SHOWN_AFTER_MS),
                         }
                     }
                 }
@@ -3390,7 +3382,7 @@ impl AppState {
         });
         // The open chat's caption appears, and a room stalls under it or
         // under a pending send, by clock alone; other chats' clocks change
-        // nothing on screen. Only a dialing room that is down can stall.
+        // nothing on screen. Only a room that is down can stall.
         let syncing = self
             .sync_clocks
             .iter()
@@ -3410,9 +3402,8 @@ impl AppState {
                     .iter()
                     .any(|chat| chat.chat_id == *id && !chat.connected);
                 let shown = clock.began + chrono::TimeDelta::milliseconds(SYNC_SHOWN_AFTER_MS);
-                let stalled = clock.dialing.filter(|_| down).map(|dialing| {
-                    dialing + chrono::TimeDelta::milliseconds(SYNC_STALLED_AFTER_MS)
-                });
+                let stalled = down
+                    .then(|| clock.began + chrono::TimeDelta::milliseconds(SYNC_STALLED_AFTER_MS));
                 std::iter::once(shown).chain(stalled)
             });
         stale.chain(offline).chain(grace).chain(syncing)
@@ -8426,11 +8417,12 @@ mod tests {
         assert!(s.sync_clocks.is_empty());
     }
 
-    /// Waiting for a sync slot is no outage, however long it lasts: a chat
-    /// queued behind busy rooms reads as syncing when opened, and only a
-    /// dial that outlives its own budget stalls.
+    /// A chat queued behind busy rooms reads as syncing when opened, with a
+    /// fresh hold and a fresh stall budget. But a sync that never delivers
+    /// always ends up stalled: the engine moving its room back to waiting
+    /// for a slot does not restart the clock and spin forever.
     #[gpui::test]
-    fn waiting_for_a_sync_slot_never_reads_as_an_outage(cx: &mut gpui::TestAppContext) {
+    fn a_sync_that_never_delivers_stalls_even_back_in_the_queue(cx: &mut gpui::TestAppContext) {
         use zeron_proto::ChatSyncState as C;
         let t0 = clock_epoch();
         let clock = TestClock::start(t0);
@@ -8444,9 +8436,9 @@ mod tests {
         let link = |cx: &mut gpui::TestAppContext, ms| {
             state.read_with(cx, |s, _| s.chat_link_at("c-remote", at(ms)).sync)
         };
-        assert_eq!(link(cx, 60_000), LinkSync::Syncing { shown: true });
-        // Opened a minute in: the caption's hold starts now, so a sync that
-        // ends quickly never flashes one.
+        assert_eq!(link(cx, 60_000), LinkSync::Stalled);
+        // Opened a minute in: the caption's hold and the stall start now, so
+        // a sync that ends quickly never flashes either.
         clock.set(at(60_000));
         state.update(cx, |s, cx| s.select_chat(Some("c-remote".into()), cx));
         assert_eq!(link(cx, 60_000), LinkSync::Syncing { shown: false });
@@ -8454,20 +8446,28 @@ mod tests {
             link(cx, 60_000 + SYNC_SHOWN_AFTER_MS),
             LinkSync::Syncing { shown: true }
         );
-        // Admitted: the dial gets its whole budget from here.
+        // Admitted, then moved back to waiting for a slot before its room
+        // ever joined: the clock runs on through both.
         state.update(cx, |s, _| {
             s.apply_connectivity_at(connectivity(C::Connecting, false, false), at(61_000))
         });
+        state.update(cx, |s, _| {
+            s.apply_connectivity_at(connectivity(C::Waiting, false, false), at(80_000))
+        });
         assert_eq!(
-            link(cx, 61_000 + SYNC_STALLED_AFTER_MS - 1),
+            link(cx, 60_000 + SYNC_STALLED_AFTER_MS - 1),
             LinkSync::Syncing { shown: true }
         );
-        assert_eq!(link(cx, 61_000 + SYNC_STALLED_AFTER_MS), LinkSync::Stalled);
-        // Back in the queue: no dial, no stall.
+        assert_eq!(link(cx, 60_000 + SYNC_STALLED_AFTER_MS), LinkSync::Stalled);
         state.update(cx, |s, _| {
-            s.apply_connectivity_at(connectivity(C::Waiting, false, false), at(100_000))
+            s.apply_connectivity_at(connectivity(C::Connecting, false, false), at(100_000))
         });
-        assert_eq!(link(cx, 200_000), LinkSync::Syncing { shown: true });
+        assert_eq!(link(cx, 200_000), LinkSync::Stalled);
+        // Only delivery ends it.
+        state.update(cx, |s, _| {
+            s.apply_connectivity_at(connectivity(C::Synced, true, true), at(200_000))
+        });
+        assert_eq!(link(cx, 200_000), LinkSync::Live);
     }
 
     /// A new engine's first frame restarts every sync clock: a chat the last
