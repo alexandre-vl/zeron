@@ -107,6 +107,10 @@ composer's 4 s hold. In [`docs/screenshots/remote-chat-sync`](../screenshots/rem
 | `fork-waiting`: 2.5 s into a fork | Nothing | "Forking on omarchy…" tab |
 | `fork-failed`: the host's answer fails | Error in the parent's composer | Error and Retry in the tab |
 
+The `after-fork-failed.png` capture predates the maintainer's restyle of that
+state ("Couldn't fork on omarchy", the reason as muted detail, a ghost Retry);
+the fixture's `fork` scene renders the current one.
+
 ## Before/after proof
 
 The engine tests were run with the line that sets the flag on a verified write
