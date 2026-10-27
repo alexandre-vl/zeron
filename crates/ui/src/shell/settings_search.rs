@@ -530,7 +530,9 @@ mod tests {
 
     /// A pick leaves the keyboard in the field, for the next one: Appshots,
     /// which takes it as it opens, leaves it there, and so does a click,
-    /// which Settings would take it on.
+    /// which Settings would take it on. Appshots shows only where it captures
+    /// (`appshots::is_desktop`); elsewhere search hides its page.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[gpui::test]
     fn a_pick_keeps_the_keyboard_in_the_field(cx: &mut TestAppContext) {
         let (shell, cx, _dir) = open_settings(cx);
