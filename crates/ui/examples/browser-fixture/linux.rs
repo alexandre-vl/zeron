@@ -246,7 +246,11 @@ fn processes() -> (u32, Vec<u32>) {
         }
         false
     };
-    let engine = parents.keys().copied().filter(|pid| descends(*pid)).collect();
+    let engine = parents
+        .keys()
+        .copied()
+        .filter(|pid| descends(*pid))
+        .collect();
     (me, engine)
 }
 
@@ -257,8 +261,15 @@ fn cpu_seconds(pids: &[u32]) -> f64 {
         .filter_map(|pid| std::fs::read_to_string(format!("/proc/{pid}/stat")).ok())
         .map(|stat| {
             // utime and stime are the 14th and 15th fields overall.
-            let fields: Vec<&str> = stat[stat.rfind(')').unwrap_or(0) + 2..].split(' ').collect();
-            let field = |i: usize| fields.get(i - 3).and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.);
+            let fields: Vec<&str> = stat[stat.rfind(')').unwrap_or(0) + 2..]
+                .split(' ')
+                .collect();
+            let field = |i: usize| {
+                fields
+                    .get(i - 3)
+                    .and_then(|v| v.parse::<f64>().ok())
+                    .unwrap_or(0.)
+            };
             (field(14) + field(15)) / ticks
         })
         .sum()
@@ -278,7 +289,10 @@ fn pss_mib(pids: &[u32]) -> f64 {
 
 /// GPU memory NVIDIA's driver reports for each set of processes, in MiB.
 fn gpu_mib(sets: &[&[u32]]) -> Option<Vec<f64>> {
-    let output = std::process::Command::new("nvidia-smi").args(["-q", "-d", "PIDS"]).output().ok()?;
+    let output = std::process::Command::new("nvidia-smi")
+        .args(["-q", "-d", "PIDS"])
+        .output()
+        .ok()?;
     if !output.status.success() {
         return None;
     }
@@ -291,7 +305,12 @@ fn gpu_mib(sets: &[&[u32]]) -> Option<Vec<f64>> {
         match key.trim() {
             "Process ID" => pid = value.trim().parse().unwrap_or(0),
             "Used GPU Memory" => {
-                let mib = value.trim().trim_end_matches("MiB").trim().parse().unwrap_or(0.);
+                let mib = value
+                    .trim()
+                    .trim_end_matches("MiB")
+                    .trim()
+                    .parse()
+                    .unwrap_or(0.);
                 if let Some(set) = sets.iter().position(|set| set.contains(&pid)) {
                     used[set] += mib;
                 }
@@ -332,7 +351,10 @@ async fn frame_rates(
     pause(cx, millis).await;
     let after = eval(page, frames, cx).await?.as_f64().unwrap_or(0.);
     let elapsed = start.elapsed().as_secs_f64();
-    Ok(((after - before) / elapsed, f64::from(display.get() - shown) / elapsed))
+    Ok((
+        (after - before) / elapsed,
+        f64::from(display.get() - shown) / elapsed,
+    ))
 }
 
 /// Milliseconds between `times`, two decimals.
@@ -366,10 +388,15 @@ async fn fresh_page(
     eval(page, "document.title='stale';true", cx).await?;
     let deadline = std::time::Instant::now() + Duration::from_secs(15);
     while page.read_with(cx, |b, _| b.page.title != "stale") {
-        anyhow::ensure!(std::time::Instant::now() < deadline, "the bench page kept its title");
+        anyhow::ensure!(
+            std::time::Instant::now() < deadline,
+            "the bench page kept its title"
+        );
         pause(cx, 20).await;
     }
-    window.update(cx, |_, w, cx| page.update(cx, |b, cx| b.navigate(url, w, cx)))?;
+    window.update(cx, |_, w, cx| {
+        page.update(cx, |b, cx| b.navigate(url, w, cx))
+    })?;
     while !page.read_with(cx, |b, _| b.page.title == "Fieldnotes" && !b.page.loading) {
         anyhow::ensure!(std::time::Instant::now() < deadline, "{url} did not load");
         pause(cx, 20).await;
@@ -402,7 +429,9 @@ async fn scenario(
     pause(cx, (seconds * 1000.) as u64).await;
     let (zeron_after, engine_after) = (cpu_seconds(&[me]), cpu_seconds(&engine));
     let elapsed = start.elapsed().as_secs_f64();
-    let (painted, times) = page.update(cx, |b, _| (b.fixture_linux_painted(), b.fixture_linux_record(false)));
+    let (painted, times) = page.update(cx, |b, _| {
+        (b.fixture_linux_painted(), b.fixture_linux_record(false))
+    });
     let page_after = page_frames(page, counted, cx).await?;
     let error = eval(page, "window.benchError||null", cx).await?;
     let info = eval(page, "typeof benchInfo=='function'?benchInfo():null", cx).await?;
@@ -436,7 +465,8 @@ async fn press_latency(
     samples: usize,
     cx: &mut AsyncApp,
 ) -> anyhow::Result<serde_json::Value> {
-    let square = page.read_with(cx, |b, _| b.fixture_linux_bounds().origin) + point(px(60.), px(60.));
+    let square =
+        page.read_with(cx, |b, _| b.fixture_linux_bounds().origin) + point(px(60.), px(60.));
     // The first press focuses the page.
     click(window, square, cx)?;
     pause(cx, 500).await;
@@ -449,7 +479,9 @@ async fn press_latency(
         presses.push(std::time::Instant::now());
         click(window, square, cx)?;
         let deadline = std::time::Instant::now() + Duration::from_secs(1);
-        while page.update(cx, |b, _| b.fixture_linux_painted()).0 == before && std::time::Instant::now() < deadline {
+        while page.update(cx, |b, _| b.fixture_linux_painted()).0 == before
+            && std::time::Instant::now() < deadline
+        {
             pause(cx, 2).await;
         }
     }
@@ -480,7 +512,10 @@ pub async fn bench(
     seconds: f64,
     cx: &mut AsyncApp,
 ) -> anyhow::Result<()> {
-    let width = std::env::var("ZERON_BROWSER_BENCH_WIDTH").ok().and_then(|w| w.parse().ok()).unwrap_or(1400.);
+    let width = std::env::var("ZERON_BROWSER_BENCH_WIDTH")
+        .ok()
+        .and_then(|w| w.parse().ok())
+        .unwrap_or(1400.);
     window.update(cx, |s, _, cx| s.fixture_resize_browser(width, cx))?;
     pause(cx, 1000).await;
     let mut scenarios = serde_json::Map::new();
@@ -496,7 +531,10 @@ pub async fn bench(
             continue;
         }
         fresh_page(window, &page, &format!("{origin}/bench-{name}"), cx).await?;
-        scenarios.insert(name.into(), scenario(&page, script, counted, 2000, seconds, cx).await?);
+        scenarios.insert(
+            name.into(),
+            scenario(&page, script, counted, 2000, seconds, cx).await?,
+        );
         super::capture_frame(window, output, &format!("bench-{name}"), cx).await?;
     }
     fresh_page(window, &page, &format!("{origin}/bench-still"), cx).await?;
@@ -517,7 +555,10 @@ pub async fn bench(
         "latency": latency,
         "idle": idle,
     });
-    std::fs::write(output.join("bench.json"), serde_json::to_vec_pretty(&result)?)?;
+    std::fs::write(
+        output.join("bench.json"),
+        serde_json::to_vec_pretty(&result)?,
+    )?;
     Ok(())
 }
 
@@ -606,7 +647,9 @@ pub async fn exercise(
     // workspace (`ZERON_BROWSER_FIXTURE_UNFOCUSED`) type that text instead.
     let clipboard = std::env::var_os("ZERON_BROWSER_FIXTURE_UNFOCUSED").is_none();
     if clipboard {
-        cx.update(|cx| cx.write_to_clipboard(gpui::ClipboardItem::new_string(" — café 日本語".into())));
+        cx.update(|cx| {
+            cx.write_to_clipboard(gpui::ClipboardItem::new_string(" — café 日本語".into()))
+        });
         pause(cx, 200).await;
         let paste = gpui::Keystroke::parse("ctrl-v")?;
         dispatch(
@@ -986,7 +1029,11 @@ pub async fn exercise(
     let (frame_rate, display_rate) =
         frame_rates(window, &page, "window.browserFrames", 2000, cx).await?;
     let path = page.read_with(cx, |b, _| b.fixture_linux_frames());
-    let expected = if path.is_null() { display_rate.min(60.) } else { display_rate };
+    let expected = if path.is_null() {
+        display_rate.min(60.)
+    } else {
+        display_rate
+    };
     anyhow::ensure!(
         frame_rate > expected * 0.9,
         "the page renders {frame_rate:.1} frames/s on a display showing {display_rate:.1}"
