@@ -280,13 +280,17 @@ static void z_clipboard_class_init(ZClipboardClass *klass) {
     WPE_CLIPBOARD_CLASS(klass)->read = z_clipboard_read;
 }
 static void z_clipboard_init(ZClipboard *z) {}
+// Empty text clears the copy: a paste with no text on the system clipboard
+// must not insert what an earlier paste shared, possibly into another page.
 static void set_system_clipboard(WPEClipboard *clipboard, const char *text) {
     ZClipboard *z = (ZClipboard *)clipboard;
     g_free(z->system);
-    z->system = g_strdup(text);
+    z->system = *text ? g_strdup(text) : NULL;
     GPtrArray *formats = g_ptr_array_new_null_terminated(2, NULL, TRUE);
-    g_ptr_array_add(formats, (gpointer)g_intern_static_string("text/plain"));
-    g_ptr_array_add(formats, (gpointer)g_intern_static_string("text/plain;charset=utf-8"));
+    if (z->system) {
+        g_ptr_array_add(formats, (gpointer)g_intern_static_string("text/plain"));
+        g_ptr_array_add(formats, (gpointer)g_intern_static_string("text/plain;charset=utf-8"));
+    }
     // Not local: WebKit reads it back through z_clipboard_read and it is not
     // echoed to Zeron, which would replace richer system content with text.
     WPE_CLIPBOARD_GET_CLASS(clipboard)->changed(clipboard, formats, FALSE, NULL);
@@ -731,6 +735,13 @@ static GArray *renderable_modifiers(ZDisplay *d) {
     g_free(external);
     return modifiers;
 }
+static void close_gbm(ZDisplay *d) {
+    g_clear_pointer(&d->gbm, gbm_device_destroy);
+    if (d->gbm_fd >= 0) {
+        close(d->gbm_fd);
+        d->gbm_fd = -1;
+    }
+}
 // WebKit aborts its web process when GBM EGL cannot initialize, so only
 // advertise the GPU after initializing EGL on it here.
 static void probe_gpu(ZDisplay *d) {
@@ -748,6 +759,9 @@ static void probe_gpu(ZDisplay *d) {
     if (!primary || egl == EGL_NO_DISPLAY || !eglInitialize(egl, &major, &minor)) {
         g_printerr("zeron-wpe: no usable EGL on %s (0x%x), using shared memory\n", render_node,
                    eglGetError());
+        if (egl != EGL_NO_DISPLAY)
+            eglTerminate(egl);
+        close_gbm(d);
         g_free(primary);
         return;
     }
@@ -759,6 +773,7 @@ static void probe_gpu(ZDisplay *d) {
         g_array_unref(renderable);
         eglTerminate(egl);
         d->egl = EGL_NO_DISPLAY;
+        close_gbm(d);
         g_free(primary);
         return;
     }

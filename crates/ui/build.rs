@@ -30,6 +30,7 @@ fn main() {
     println!("cargo:rerun-if-changed=src/browser/linux/helper.c");
     println!("cargo:rerun-if-changed=src/browser/linux/wpe.c");
     println!("cargo:rerun-if-env-changed=ZERON_WPE");
+    println!("cargo:rerun-if-env-changed=PKG_CONFIG_PATH");
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("linux") {
         return;
     }
@@ -64,8 +65,9 @@ fn main() {
 }
 
 /// The WPE WebKit helper is optional: without WPE WebKit 2.50+ development
-/// files (or with `ZERON_WPE=0`) the build embeds an empty helper and the
-/// browser uses WebKitGTK.
+/// files, with ones it does not compile against (an older GBM), or with
+/// `ZERON_WPE=0`, the build embeds an empty helper and the browser uses
+/// WebKitGTK.
 fn build_wpe_helper() {
     let output = PathBuf::from(env::var_os("OUT_DIR").unwrap()).join("zeron-wpe");
     let packages = [
@@ -110,5 +112,10 @@ fn build_wpe_helper() {
         .arg("-lm")
         .status()
         .expect("C compiler is required to build the Linux browser helper");
-    assert!(status.success(), "WPE WebKit helper compilation failed");
+    if !status.success() {
+        println!(
+            "cargo:warning=WPE WebKit helper compilation failed; the Linux browser will use WebKitGTK"
+        );
+        std::fs::write(&output, []).unwrap();
+    }
 }

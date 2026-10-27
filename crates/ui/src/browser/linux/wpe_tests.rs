@@ -1050,6 +1050,15 @@ fn wpe_takes_keyboard_pointer_scroll_and_clipboard_input() {
     driver.until("paste", |d| {
         d.eval(page, "document.getElementById('i').value") == "hi — café 日本語"
     });
+    // A clipboard without text pastes nothing, not the earlier copy. WebKit
+    // reads the clipboard after the key, so give it time before checking.
+    driver.send(page, json!({"cmd": "clipboard", "text": ""}));
+    driver.key(page, "v", 4);
+    driver.run(240., Duration::from_millis(500));
+    assert_eq!(
+        driver.eval(page, "document.getElementById('i').value"),
+        "hi — café 日本語"
+    );
     driver.events();
     driver.key(page, "a", 4);
     driver.key(page, "c", 4);

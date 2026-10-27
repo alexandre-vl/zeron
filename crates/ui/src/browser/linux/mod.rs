@@ -1047,12 +1047,12 @@ impl super::BrowserSurface {
         true
     }
     /// WebKit reads the system clipboard only through Zeron: refresh its copy
-    /// before anything that pastes.
+    /// before anything that pastes. No text clears it, so a paste never
+    /// inserts what an earlier one shared.
     pub(super) fn linux_share_clipboard(&self, cx: &gpui::App) {
-        if let Some(native) = self.native.as_ref().filter(|n| n.engine() == Engine::Wpe)
-            && let Some(text) = cx.read_from_clipboard().and_then(|item| item.text())
-        {
-            native.command(json!({"cmd":"clipboard","text":text}));
+        if let Some(native) = self.native.as_ref().filter(|n| n.engine() == Engine::Wpe) {
+            let text = cx.read_from_clipboard().and_then(|item| item.text());
+            native.command(json!({"cmd":"clipboard","text":text.unwrap_or_default()}));
         }
     }
     pub(super) fn linux_key(&self, stroke: &gpui::Keystroke, down: bool) {
