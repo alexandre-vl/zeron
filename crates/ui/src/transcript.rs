@@ -2339,6 +2339,9 @@ const TOOL_IMAGE_STRIP_HEIGHT: f32 = DETAIL_SEPARATOR + TOOL_IMAGE_HEIGHT + 2.0 
 struct ImageMenu {
     path: String,
     devices: Vec<String>,
+    /// A reply's Markdown image: its chat and type. Copy image reads it
+    /// through `ReadChatImageChunk`, under that chat's jail, like the preview.
+    chat_image: Option<(String, &'static str)>,
     position: Point<Pixels>,
     active: Option<usize>,
 }
@@ -6386,6 +6389,27 @@ impl Transcript {
         self.image_menu.open(ImageMenu {
             path,
             devices,
+            chat_image: None,
+            position,
+            active: None,
+        });
+        window.focus(&self.image_menu_focus, cx);
+        cx.notify();
+    }
+
+    /// The image menu for an image a reply in `chat` names in Markdown, read
+    /// from `host` within that chat's folder.
+    fn open_chat_image_menu(
+        &mut self,
+        request: &crate::reply_images::ReplyImageRequest,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.image_menu.open(ImageMenu {
+            path: request.path.clone(),
+            devices: vec![request.host.clone()],
+            chat_image: Some((request.chat_id.clone(), request.mime)),
             position,
             active: None,
         });
@@ -6429,16 +6453,23 @@ impl Transcript {
             return;
         };
         let (path, devices) = (menu.path.clone(), menu.devices.clone());
+        let chat_image = menu.chat_image.clone();
         self.close_image_menu(cx);
         match action {
             0 => cx.write_to_clipboard(gpui::ClipboardItem::new_string(path)),
-            1 => self.copy_image(path, devices, cx),
+            1 => self.copy_image(path, devices, chat_image, cx),
             _ => {}
         }
     }
 
     /// Copy the original file (not the preview) from its owning device.
-    fn copy_image(&mut self, path: String, devices: Vec<String>, cx: &mut Context<Self>) {
+    fn copy_image(
+        &mut self,
+        path: String,
+        devices: Vec<String>,
+        chat_image: Option<(String, &'static str)>,
+        cx: &mut Context<Self>,
+    ) {
         let Some(engine) = self.state.read(cx).engine().cloned() else {
             return;
         };
@@ -6447,11 +6478,21 @@ impl Transcript {
             let executor = cx.background_executor().clone();
             for device in &devices {
                 let target = (local.as_deref() != Some(device.as_str())).then_some(device.as_str());
-                if let Some((_, mime, bytes)) = crate::attachments::read_attachment_bytes(
-                    &engine, &executor, target, &path, None,
-                )
-                .await
-                {
+                let read = match &chat_image {
+                    Some((chat, mime)) => {
+                        crate::attachments::read_chat_image_bytes(
+                            &engine, &executor, target, chat, &path, mime,
+                        )
+                        .await
+                    }
+                    None => {
+                        crate::attachments::read_attachment_bytes(
+                            &engine, &executor, target, &path, None,
+                        )
+                        .await
+                    }
+                };
+                if let Some((_, mime, bytes)) = read {
                     let format =
                         gpui::ImageFormat::from_mime_type(&mime).unwrap_or(gpui::ImageFormat::Png);
                     // SVG is markup an agent may have written: copy the parsed,
@@ -6867,10 +6908,24 @@ impl Transcript {
                 // `{row}-image-{block}-{run}`: the row to remeasure on landing.
                 let row = SharedString::from(id.rsplit_once("-image-")?.0.to_owned());
                 let element = match images.borrow_mut().lookup(&image.source, row)? {
-                    ReplyImage::Loaded(loaded) => {
-                        let open = viewer.clone();
+                    ReplyImage::Loaded(loaded, request) => {
+                        let (open, menu) = (viewer.clone(), viewer.clone());
                         sized(frame(id), &loaded.image, theme)
                             .debug_selector(|| "reply-image".into())
+                            .on_mouse_down(
+                                gpui::MouseButton::Right,
+                                move |event: &gpui::MouseDownEvent, window, cx| {
+                                    cx.stop_propagation();
+                                    let _ = menu.update(cx, |this, cx| {
+                                        this.open_chat_image_menu(
+                                            &request,
+                                            event.position,
+                                            window,
+                                            cx,
+                                        )
+                                    });
+                                },
+                            )
                             .on_click(move |_, window, cx| {
                                 let preview = crate::attachments::PreviewImage::new(
                                     loaded.name.clone(),
@@ -13175,9 +13230,29 @@ mod tests {
                 .expect("the lightbox opens");
             assert_eq!(preview.name.as_ref(), "before.png");
         });
+        // Right-click offers Copy path / Copy image, reading the original
+        // through the same chat's jail.
+        transcript.update(cx, |this, _| this.attachment_preview = None);
+        fixture.update(cx, |_, cx| cx.notify());
+        cx.run_until_parked();
+        let image = cx.debug_bounds("reply-image").expect("drawn again");
+        cx.simulate_mouse_down(
+            image.center(),
+            gpui::MouseButton::Right,
+            gpui::Modifiers::default(),
+        );
+        transcript.read_with(cx, |this, _| {
+            let menu = this.image_menu.as_open().expect("the image menu opens");
+            assert_eq!(menu.path, shown);
+            assert_eq!(menu.devices, ["reply-host"]);
+            assert_eq!(
+                menu.chat_image,
+                Some(("reply-chat".to_owned(), "image/png"))
+            );
+        });
         // The same reply in another chat doesn't reuse the first chat's read.
-        transcript.update(cx, |this, _| {
-            this.attachment_preview = None;
+        transcript.update(cx, |this, cx| {
+            this.close_image_menu(cx);
             this.chat_id = Some("reply-other".into());
         });
         fixture.update(cx, |_, cx| cx.notify());

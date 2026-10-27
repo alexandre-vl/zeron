@@ -1943,6 +1943,7 @@ mod tests {
             Origin {
                 chat_id: Some("chat-alpha-1".into()),
                 device_id: Some("dev-local".into()),
+                ..Default::default()
             },
         );
         assert!(inside.has("show_image"));

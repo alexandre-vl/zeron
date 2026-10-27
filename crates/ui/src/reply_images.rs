@@ -87,7 +87,8 @@ pub(crate) struct ReplyImageRequest {
 
 /// How a reply draws one of the images it names.
 pub(crate) enum ReplyImage {
-    Loaded(CachedAttachmentImage),
+    /// Drawn; the request says where it came from, for the image menu.
+    Loaded(CachedAttachmentImage, Box<ReplyImageRequest>),
     /// The first read is under way: the frame holds the image's place.
     Loading,
 }
@@ -124,18 +125,19 @@ impl ReplyImages {
         let key = AttachmentKey::chat_image(&chat.host, &chat.id, &path, mime);
         self.rows.entry(key.clone()).or_default().insert(row);
         let snapshot = attachment_snapshot_for(&key);
-        if let AttachmentSnapshot::Loaded(loaded) = snapshot {
-            return Some(ReplyImage::Loaded(loaded));
-        }
         let first_read =
             matches!(snapshot, AttachmentSnapshot::Loading) && !self.failed.contains(&key);
-        self.wanted.push(ReplyImageRequest {
+        let request = ReplyImageRequest {
             key,
             chat_id: chat.id.clone(),
             host: chat.host.clone(),
             path,
             mime,
-        });
+        };
+        if let AttachmentSnapshot::Loaded(loaded) = snapshot {
+            return Some(ReplyImage::Loaded(loaded, Box::new(request)));
+        }
+        self.wanted.push(request);
         first_read.then_some(ReplyImage::Loading)
     }
 
@@ -180,7 +182,8 @@ pub(crate) fn frame(id: SharedString) -> gpui::Stateful<gpui::Div> {
 
 /// `frame` sized to a decoded image, plus its hairline on each side (so the
 /// image fills it instead of letterboxing — a wide strip would lose most), as
-/// a button: the caller says what a click opens.
+/// a button: the caller says what a click opens. A column narrower than the
+/// image scales the frame down whole, keeping its aspect ratio.
 pub(crate) fn sized(
     frame: gpui::Stateful<gpui::Div>,
     image: &Arc<gpui::Image>,
@@ -189,9 +192,12 @@ pub(crate) fn sized(
     let (width, height) = crate::appshots::png_dimensions(&image.bytes).unwrap_or((512, 320));
     let scale = (512.0 / width as f32).min(420.0 / height as f32).min(1.0);
     let accent = theme.accent;
+    let (width, height) = (width as f32 * scale + 2.0, height as f32 * scale + 2.0);
     frame
-        .w(px(width as f32 * scale + 2.0))
-        .h(px(height as f32 * scale + 2.0))
+        .w(px(width))
+        .h_auto()
+        .max_h_auto()
+        .aspect_ratio(width / height)
         .role(gpui::Role::Button)
         .aria_label("Preview image")
         .tab_index(0)

@@ -763,15 +763,8 @@ pub(crate) async fn read_chat_image(
     path: &str,
     expected: &str,
 ) -> Option<LoadedAttachmentImage> {
-    let (name, mime, bytes) = read_chunks(
-        engine,
-        executor,
-        target_device_id,
-        methods::READ_CHAT_IMAGE_CHUNK,
-        serde_json::json!({ "chatId": chat_id, "path": path }),
-        Some(expected),
-    )
-    .await?;
+    let (name, mime, bytes) =
+        read_chat_image_bytes(engine, executor, target_device_id, chat_id, path, expected).await?;
     if bytes.is_empty() {
         return None;
     }
@@ -783,6 +776,28 @@ pub(crate) async fn read_chat_image(
             name
         },
     })
+}
+
+/// The original bytes of a reply's Markdown image (`{name, mimeType, bytes}`),
+/// under the same jail as [`read_chat_image`]: what Copy image puts on the
+/// clipboard, not the downscaled preview.
+pub(crate) async fn read_chat_image_bytes(
+    engine: &EngineHandle,
+    executor: &BackgroundExecutor,
+    target_device_id: Option<&str>,
+    chat_id: &str,
+    path: &str,
+    expected: &str,
+) -> Option<(String, String, Vec<u8>)> {
+    read_chunks(
+        engine,
+        executor,
+        target_device_id,
+        methods::READ_CHAT_IMAGE_CHUNK,
+        serde_json::json!({ "chatId": chat_id, "path": path }),
+        Some(expected),
+    )
+    .await
 }
 
 /// PNG, JPEG, WebP, or GIF bytes of the `expected` type, decoded off the UI
