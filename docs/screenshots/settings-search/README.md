@@ -20,10 +20,11 @@ the frosted surface and `ZERON_FIXTURE_SIZE=<w>x<h>` the window size.
 - ⌘F (Ctrl+F) focuses the field from anywhere in Settings and selects its
   query. Its hint shows while the field is idle, unless one of the user's
   shortcuts is on ⌘F and takes the key first.
-- The index (`crates/ui/src/settings/search.rs`) lists the 53 settings rows by
+- The index (`crates/ui/src/settings/search.rs`) lists the 57 settings rows by
   page, block, title and the words people search by; every shortcut where it
   is recorded (the Shortcuts page, Dictation on Voice, the global capture on
-  Appshots); and every page.
+  Appshots); and every page. A provider's own rows (Completion, Delegation,
+  Updates) land on it when it is expanded, else on the provider list.
 - Every query word must match a field: title 100, the row's own terms 40, its
   block 30, its page 20, half again at a word start; a title that is the whole
   query outranks the rest. A word nothing spells may find a title or page word

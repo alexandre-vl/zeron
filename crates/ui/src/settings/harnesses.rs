@@ -36,7 +36,9 @@ use crate::motion;
 use crate::pickers::visible_harnesses;
 use crate::popover::{self, Loadable};
 use crate::settings::accounts::{self, AccountsPage};
+use crate::settings::search::{SearchAnchor, SettingId, Target};
 use crate::settings::widgets;
+use crate::shell::SettingsSection;
 use crate::state::AppState;
 use crate::theme::Theme;
 
@@ -533,7 +535,7 @@ impl HarnessesPage {
                 .flex()
                 .flex_col()
                 .child(widgets::details_label(theme, "Updates"))
-                .child(row)
+                .child(row.search_anchor(SettingId::UpdatePolicy))
                 .into_any_element(),
         )
     }
@@ -553,6 +555,32 @@ impl HarnessesPage {
                 .accounts_page
                 .as_ref()
                 .is_some_and(|accounts| accounts.read(cx).has_escape_surface())
+    }
+
+    /// `harness` as the only provider, expanded, with every section its
+    /// details can show loaded: what the settings search must find there.
+    #[cfg(test)]
+    pub(crate) fn show_provider_details(&mut self, harness: HarnessId, cx: &mut Context<Self>) {
+        self.harnesses = Loadable::Ready(vec![HarnessDescriptor {
+            id: harness,
+            name: format!("{harness:?}"),
+            supports_steering: false,
+            steering_mode: zeron_proto::SteeringMode::TurnBoundary,
+            reasoning_levels: Vec::new(),
+            installed: true,
+            can_install: false,
+            enabled: Some(true),
+        }]);
+        self.updates = Loadable::Ready(vec![
+            serde_json::from_value(serde_json::json!({ "harness": harness, "phase": "current" }))
+                .unwrap(),
+        ]);
+        self.native_subagents = Loadable::Ready(zeron_engine::registry::NativeSubagentSettings {
+            switchable: vec![harness],
+            off: Vec::new(),
+        });
+        self.expanded_harness = None;
+        self.toggle_agent_details(harness, cx);
     }
 
     /// Escape that reached Settings unclaimed goes to the expanded provider's
@@ -1497,6 +1525,11 @@ impl Render for HarnessesPage {
                     .into_any_element()
             }
         };
+        // A provider's own rows show once it is expanded: until then, a hit
+        // on one lands on the list, to pick the provider.
+        let body = body
+            .search_anchor(Target::Page(SettingsSection::Harnesses))
+            .block();
         crate::toast::take_error(&mut self.error, cx);
         if embedded {
             let scrollbar = popover::rail(self, "harnesses-embedded-scrollbar", &theme, cx);
@@ -1579,6 +1612,7 @@ impl Render for HarnessesPage {
                 )
                 .fade_overflow_y(&self.scroll.scroll),
             )
+            .child(widgets::page_reveal(&self.scroll.scroll))
             .children(scrollbar)
             .into_any_element()
     }

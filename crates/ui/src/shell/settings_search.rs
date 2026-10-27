@@ -179,11 +179,15 @@ impl Shell {
                 }
             })
             .on_key_down(cx.listener(Self::on_settings_search_key))
+            // The magnifier takes a nav glyph's slot and gap, so the query
+            // lines up with the section names it stands above.
+            .gap(px(8.0))
             .child(
-                icon(icons::MAGNIFER)
-                    .size(px(14.0))
-                    .flex_none()
-                    .text_color(theme.text_muted),
+                div().w(px(16.0)).flex_none().flex().justify_center().child(
+                    icon(icons::MAGNIFER)
+                        .size(px(14.0))
+                        .text_color(theme.text_muted),
+                ),
             )
             .child(
                 div()
@@ -202,7 +206,9 @@ impl Shell {
                         .id("settings-search-clear")
                         .role(gpui::Role::Button)
                         .aria_label("Clear search")
+                        .tooltip(settings::widgets::text_tooltip("Clear search"))
                         .tab_index(0)
+                        .focus_visible(|s| s.border_2().border_color(theme.accent))
                         .size(px(20.0))
                         .flex_none()
                         .flex()
@@ -239,13 +245,12 @@ impl Shell {
             return Empty.into_any_element();
         };
         if search.hits.is_empty() {
-            return div()
-                .px(px(Theme::SPACE_SM * 2.0))
-                .pt(px(Theme::SPACE_MD + 6.0))
-                .text_size(crate::typography::ui_rems(13.0))
-                .text_color(theme.text_muted)
-                .child("No matching settings")
-                .into_any_element();
+            return command_palette::palette_empty(
+                theme,
+                "No matching settings",
+                "Try a setting, page, or shortcut.",
+            )
+            .into_any_element();
         }
         let field = search.input.focus_handle(cx);
         let rows = search.hits.iter().enumerate().map(|(ix, hit)| {
@@ -377,7 +382,9 @@ mod tests {
     use zeron_theme::{AccentSelection, SurfacePreference, ThemeSelection};
 
     use super::*;
-    use crate::settings::search::{SettingId, lit, take_anchored, unanchored, unindexed};
+    use crate::settings::search::{
+        SettingId, lit, per_provider_rows, take_anchored, unanchored, unindexed,
+    };
     use crate::settings::widgets::take_row_titles;
 
     /// A shell on Settings → General, every page drawable, motion reduced.
@@ -659,5 +666,39 @@ mod tests {
                 "{section:?} has hits that land nowhere"
             );
         }
+        // A provider's details draw only once it is expanded, with its data
+        // loaded: draw every section they can show, and hold those rows to
+        // the same agreement. The provider's own name is not a setting.
+        let harness = zeron_proto::HarnessId::ClaudeCode;
+        shell.update(cx, |shell, cx| {
+            shell.open_settings(SettingsSection::Harnesses, cx)
+        });
+        draw(cx);
+        take_anchored();
+        take_row_titles();
+        shell.update(cx, |shell, cx| {
+            let page = shell.harnesses_page.clone().expect("the Providers page");
+            page.update(cx, |page, cx| page.show_provider_details(harness, cx));
+        });
+        draw(cx);
+        let drawn: Vec<_> = take_row_titles()
+            .into_iter()
+            .filter(|title| *title != format!("{harness:?}"))
+            .collect();
+        assert_eq!(
+            unindexed(SettingsSection::Harnesses, &drawn),
+            Vec::<String>::new(),
+            "an expanded provider draws settings the search cannot find"
+        );
+        let anchored = take_anchored();
+        let missing: Vec<_> = per_provider_rows()
+            .into_iter()
+            .filter(|row| !anchored.contains(row))
+            .collect();
+        assert_eq!(
+            missing,
+            [],
+            "an expanded provider's hits land on the list, not their row"
+        );
     }
 }

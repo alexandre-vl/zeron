@@ -143,6 +143,14 @@ settings_index! {
         "input audio mic"),
     (SpeechModel, Voice, None, "Speech model",
         "parakeet download remove"),
+    (SkillDollar, Harnesses, Some("Completion"), "Use $ for skills",
+        "dollar skill picker composer autocomplete"),
+    (SkillSlash, Harnesses, Some("Completion"), "Separate / commands",
+        "slash menu skills autocomplete"),
+    (NativeSubagents, Harnesses, Some("Delegation"), "Native subagents",
+        "subagent delegate side chats tasks spawn"),
+    (UpdatePolicy, Harnesses, Some("Updates"), "Update policy",
+        "automatic upgrade version cli"),
     (CloudUsage, Cloud, None, "Usage",
         "hours consumption range"),
     (CloudGitHub, Cloud, None, "GitHub",
@@ -184,6 +192,17 @@ impl SettingId {
             _ => None,
         }
     }
+
+    /// A row each provider shows in its expanded details on Providers.
+    pub fn per_provider(self) -> bool {
+        matches!(
+            self,
+            SettingId::SkillDollar
+                | SettingId::SkillSlash
+                | SettingId::NativeSubagents
+                | SettingId::UpdatePolicy
+        )
+    }
 }
 
 /// Shortcuts recorded on a feature page rather than on Shortcuts.
@@ -214,9 +233,13 @@ pub enum Target {
 }
 
 impl Target {
-    /// Where a hit lands while this row is hidden.
+    /// Where a hit lands while this row is hidden. A provider's own rows show
+    /// only once it is expanded: until then, the provider list, to pick one.
     fn fallback(self) -> Option<Target> {
         match self {
+            Target::Setting(id) if id.per_provider() => {
+                Some(Target::Page(SettingsSection::Harnesses))
+            }
             Target::Setting(id) => id.parent().map(Target::Setting),
             Target::Shortcut(_) | Target::Page(_) => None,
         }
@@ -373,10 +396,19 @@ pub(crate) fn unanchored(section: SettingsSection, anchored: &[Target]) -> Vec<T
         .collect()
 }
 
+/// The rows each provider shows in its expanded details.
+#[cfg(test)]
+pub(crate) fn per_provider_rows() -> Vec<Target> {
+    ROWS.iter()
+        .filter(|row| row.id.per_provider())
+        .map(|row| Target::Setting(row.id))
+        .collect()
+}
+
 /// The row titles drawn on `section` that no entry holds: settings the
 /// search cannot find. (Shortcuts builds General's rows too, so a title may
 /// be held on another page.) A page with no entries of its own lists what
-/// it holds (devices, providers) and is not checked.
+/// it holds (devices, archived sessions) and is not checked.
 #[cfg(test)]
 pub(crate) fn unindexed(section: SettingsSection, drawn: &[gpui::SharedString]) -> Vec<String> {
     let rows = |indexed: &&Indexed| !matches!(indexed.entry.target, Target::Page(_));
@@ -731,6 +763,22 @@ mod tests {
                 Target::Shortcut(ShortcutId::ToggleDictation),
                 SettingsSection::Voice
             )
+        );
+    }
+
+    #[test]
+    fn a_providers_own_rows_land_on_the_list_until_it_is_expanded() {
+        assert_eq!(
+            top("subagents"),
+            Target::Setting(SettingId::NativeSubagents)
+        );
+        assert_eq!(
+            top("update policy"),
+            Target::Setting(SettingId::UpdatePolicy)
+        );
+        assert_eq!(
+            Target::Setting(SettingId::NativeSubagents).fallback(),
+            Some(Target::Page(SettingsSection::Harnesses))
         );
     }
 

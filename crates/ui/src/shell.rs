@@ -5636,15 +5636,10 @@ impl Shell {
         }
     }
 
-    /// Escape bubbling out of the settings page. Focused controls — open
-    /// dropdowns, the shortcut recorder, a dialog's own input — consume it
-    /// before it gets here. What remains open without holding focus closes
-    /// first: the account menu, a sync prompt, then the routed page's dialog
-    /// or login flow. Returns whether one did; only then does Settings stay.
     /// Whether a dialog or menu that Escape would close is open over Settings:
     /// [`Self::dismiss_settings_escape_surface`] without the dismissing.
     fn settings_escape_surface_open(&self, cx: &App) -> bool {
-        if self.sync_flow.has_visible_overlay() || self.user_menu.get().is_some() {
+        if self.sync_flow.has_visible_overlay() || self.user_menu.is_open() {
             return true;
         }
         let Route::Settings(section) = self.route else {
@@ -5671,6 +5666,11 @@ impl Shell {
         }
     }
 
+    /// Escape bubbling out of the settings page. Focused controls — open
+    /// dropdowns, the shortcut recorder, a dialog's own input — consume it
+    /// before it gets here. What remains open without holding focus closes
+    /// first: the account menu, a sync prompt, then the routed page's dialog
+    /// or login flow. Returns whether one did; only then does Settings stay.
     fn dismiss_settings_escape_surface(&mut self, cx: &mut Context<Self>) -> bool {
         if self.sync_flow.has_visible_overlay() {
             return true;
