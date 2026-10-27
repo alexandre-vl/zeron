@@ -1058,27 +1058,6 @@ impl NativePage {
             app.postEvent_atStart(&event, false);
         }
     }
-    /// A mouse-wheel tick of `lines` at `(x, y)` in the window, taken as the
-    /// wheel monitor takes AppKit's. Whether it glides.
-    pub fn fixture_wheel(&self, lines: i32, x: f64, y: f64) -> bool {
-        use objc2_core_graphics::{CGEvent, CGScrollEventUnit};
-        let host = self.0.borrow();
-        let at = objc2_foundation::NSPoint::new(x, host.parent.bounds().size.height - y);
-        let height = NSScreen::screens(host.view.mtm())
-            .firstObject()
-            .unwrap()
-            .frame()
-            .size
-            .height;
-        let tick = CGEvent::new_scroll_wheel_event2(None, CGScrollEventUnit::Line, 1, lines, 0, 0)
-            .unwrap();
-        CGEvent::set_location(
-            Some(&*tick),
-            objc2_foundation::NSPoint::new(at.x, height - at.y),
-        );
-        host.wheel
-            .take(&host.view, &NSEvent::eventWithCGEvent(&tick).unwrap())
-    }
     pub fn fixture_visible(&self) -> bool {
         !self.0.borrow().view.isHidden()
     }
