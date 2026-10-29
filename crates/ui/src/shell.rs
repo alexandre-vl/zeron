@@ -19229,6 +19229,12 @@ impl Shell {
         self.settings.sidebar_collapsed = collapsed;
         cx.notify();
     }
+    /// Where a drag leaves the surface host's divider: opening a surface
+    /// splits the width evenly.
+    pub fn fixture_right_pane_width(&mut self, width: f32, cx: &mut Context<Self>) {
+        self.settings.right_pane_width = width;
+        cx.notify();
+    }
     pub fn fixture_appshots_transcript_start(&self, cx: &mut Context<Self>) {
         self.transcript
             .update(cx, |t, cx| t.fixture_appshots_start(cx));
