@@ -25,7 +25,17 @@ says; the MP4 is the dark run at full size.
 
 ## iPhone
 
-From the earlier pull request (#1086); the iOS code they show
-(`apps/ios/Zeron/Cloud/`) is unchanged since. A local simulator harness
-(iOS 27, iPhone 18 Pro) compiled the app's own Swift against stand-ins for
-the three FFI calls.
+`iphone-*.png`: after the pull request's third commit, the sheet in the
+desktop's words and order. A local simulator harness (iOS 27, iPhone 18 Pro)
+compiles the app's own `APIKeySheetViewController.swift` and `AccountCell`
+against stand-ins for the three FFI calls, then opens the sheet in each state.
+
+`ios-*.png` are the earlier pull request's (#1086), before that commit.
+
+## Android
+
+`android-*.png`, for the stacked Android pull request: the debug app in demo
+mode (`--ez demo true --ez cloud true`) on an Android 16 emulator (Pixel 9
+Pro), driven with `adb shell input`. The demo core judges a base URL as the
+real one does; it doesn't store keys, so no saved key shows in its list.
+Resized to 720 px wide.
